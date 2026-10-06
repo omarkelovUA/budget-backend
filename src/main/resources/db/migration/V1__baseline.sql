@@ -1,0 +1,2 @@
+-- Baseline migration (M6). Intentionally empty: domain tables arrive with their
+-- modules in M7 (user, family) and M8 (account, category, transaction, budget).
