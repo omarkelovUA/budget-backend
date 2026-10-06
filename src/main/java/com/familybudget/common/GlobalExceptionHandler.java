@@ -2,7 +2,6 @@ package com.familybudget.common;
 
 import java.net.URI;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -18,10 +17,10 @@ class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
 	static final String PROBLEM_TYPE_BASE = "https://familybudget.app/problems/";
 
-	@ExceptionHandler(NotFoundException.class)
-	ProblemDetail handleNotFound(NotFoundException ex) {
-		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
-		problem.setType(URI.create(PROBLEM_TYPE_BASE + "not-found"));
+	@ExceptionHandler(ApiException.class)
+	ProblemDetail handleApiException(ApiException ex) {
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+		problem.setType(URI.create(PROBLEM_TYPE_BASE + ex.getType()));
 		return problem;
 	}
 

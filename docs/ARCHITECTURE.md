@@ -1,6 +1,6 @@
 # Family Budget — Architecture
 
-Status: draft v0.2 · 2026-10-06
+Status: draft v0.3 · 2026-10-06
 Companion doc: [PLAN.md](./PLAN.md) (roadmap, phases, open decisions)
 
 ## 1. Purpose
@@ -70,7 +70,7 @@ erDiagram
         string email
         string displayName
         string passwordHash "null if OAuth-only"
-        uuid activeFamilyId "nullable"
+        string googleSubject "null until Google login"
     }
     FAMILY {
         uuid id
@@ -78,7 +78,7 @@ erDiagram
         uuid createdBy
     }
     FAMILY_MEMBERSHIP {
-        uuid userId
+        uuid userId "PK: one family per user"
         uuid familyId
         enum role "ADMIN | MEMBER"
         timestamp joinedAt
@@ -139,9 +139,14 @@ This single polymorphic-owner pattern avoids duplicating each table into
 (see §6.3). `Transaction` has no owner of its own — its visibility is derived from the
 account(s) it touches.
 
-A user has exactly one `activeFamilyId` in v1. Creating/joining a family is a deliberate
-action (invite code or email invite); users who don't belong to one only ever see private
-data. Multi-family-per-user is listed as a v2 idea, not built now (§7).
+A user belongs to at most one family in v1. There is no `activeFamilyId` column on the
+user: `family_members` is keyed by `user_id`, so the membership row *is* the user's
+current family (one source of truth, nothing to keep in sync). Other modules ask
+`FamilyService.currentFamilyId(userId)`. Creating/joining a family is a deliberate
+action via a single-use invite code (8 chars, 7-day expiry) that an admin shares out of
+band — no email delivery in v1. Users who don't belong to a family only ever see private
+data. Multi-family-per-user is listed as a v2 idea, not built now (§7); it would bring
+back an explicit active-family choice.
 
 ### 3.3 Relationship to current frontend types
 
@@ -241,8 +246,9 @@ flowchart LR
 - Spring Modulith 2.x to verify module boundaries in tests (§5.2).
 - PostgreSQL 18 (Docker Compose for local dev, auto-started via
   `spring-boot-docker-compose`).
-- MapStruct for entity↔DTO mapping (avoids hand-written boilerplate mappers) — added with
-  the first DTOs in M7.
+- Entity↔DTO mapping is hand-written (`toView()` methods / small records) while mappings
+  stay trivial; MapStruct was considered but skipped in M7 — revisit if M8's DTOs grow
+  enough to make it pay off.
 - Jackson 3 (`tools.jackson.*`) is Boot 4's default; any custom (de)serializers target it.
 - JSpecify `@Nullable`/`@NonNull` for null-safety in our own code, matching Spring 7.
 - Testing: JUnit 5 + Testcontainers 2.x (real Postgres in integration tests, not H2).
@@ -269,9 +275,17 @@ com.familybudget
   budget/
 ```
 
-Each feature package: `*Controller`, `*Service`, `*Repository`, `*Entity`, `dto/`,
-`*Mapper`. Cross-feature calls go through the other feature's `*Service`, never its
-repository — keeps future extraction into separate services possible without a rewrite.
+Each feature package is flat: `*Controller`, `*Service`, `*Repository`, `*Entity` and
+request/response records. Only the `*Service` and its view records are `public` (the
+module's API); repositories and entities are package-private, so Java visibility and
+Spring Modulith both stop other modules reaching them. Cross-feature calls go through the
+other feature's `*Service`, never its repository — keeps future extraction into separate
+services possible without a rewrite.
+
+`security` depends on `user` (to verify passwords and find-or-create Google users), never
+the other way round. Controllers in any module get the caller's id via `common`'s
+`@CurrentUserId UUID` parameter (the JWT `sub`), so feature modules never depend on
+`security`.
 
 Each top-level package is a Spring Modulith application module. `ModularityTests` runs
 `ApplicationModules.verify()` so a module reaching into another's internals (e.g. its
@@ -281,23 +295,31 @@ is declared an *open* module since every feature uses it.
 ### 5.3 API conventions
 
 - Base path `/api/v1`, resource-oriented REST (`GET/POST/PATCH/DELETE /accounts`, etc.).
-  Spring Framework 7's built-in API versioning (path-segment strategy) can back the `v1`
-  segment instead of hard-coding it into every `@RequestMapping` — decide when the first
-  controller lands (M7); the URL shape is the same either way.
+  Decided in M7: `/api/v1` is written directly into each `@RequestMapping`. Spring
+  Framework 7's API versioning would need a `{version}` segment in every mapping anyway and
+  buys nothing until a `v2` exists; the URL shape is the same either way.
 - All list endpoints return only what the caller is authorized to see (own private data
   ∪ their active family's shared data) — enforced in the service layer, not trusted from
   query params.
-- Errors as RFC 7807 `ProblemDetail` with a stable `type`/`code` field the frontend can
-  switch on (not just an HTTP status).
+- Errors as RFC 9457 `ProblemDetail` with a stable `type` URI the frontend can switch on
+  (not just an HTTP status), e.g. `https://familybudget.app/problems/email-taken`.
 - Pagination via `page`/`size` query params + `Page<T>` response wrapper for
   transaction lists.
 
 ### 5.4 Error handling
 
-A single `@RestControllerAdvice` translates domain exceptions (`NotFoundException`,
-`ForbiddenException`, `ValidationException`, Spring Security exceptions) into consistent
-`ProblemDetail` responses. Frontend's HTTP error interceptor (§4.4) depends on this shape
-being stable from day one.
+A single `@RestControllerAdvice` in `common` translates domain exceptions into consistent
+`ProblemDetail` responses. Domain errors are `ApiException(status, type, message)` (with
+`NotFoundException` as a shorthand); the `type` slug becomes the problem `type` URI.
+Bean Validation failures are handled by Spring MVC's built-in `ProblemDetail` support.
+Frontend's HTTP error interceptor (§4.4) depends on this shape being stable from day one.
+
+Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
+`invalid-refresh-token`, `email-not-verified`, `unauthenticated`, `already-in-family`,
+`invalid-invite`, `admin-required`, `last-admin`, `cannot-remove-self`.
+
+Known gap: 401s raised by the resource server itself (missing/invalid access token) still
+have an empty body rather than a `ProblemDetail`.
 
 ## 6. Security design
 
@@ -346,18 +368,28 @@ only changes those two beans.
 
 ### 6.2 Token handling
 
-- Short-lived **access token** (JWT, ~15 min), returned in the response body, held in
-  frontend memory only (never localStorage, to limit XSS blast radius).
-- Longer-lived **refresh token**, httpOnly + Secure + SameSite=Strict cookie, used only
-  against a `/auth/refresh` endpoint; rotated on every use.
-- Logout clears the refresh cookie server-side (denylist or short-lived token family
-  invalidation — exact mechanism decided in the backend security phase, not blocking the
-  architecture now).
+- Short-lived **access token** (HS256 JWT, 15 min, `sub` = user id, plus `email`),
+  returned in the response body, held in frontend memory only (never localStorage, to
+  limit XSS blast radius).
+- Longer-lived **refresh token** (30 days): an opaque random value, not a JWT, stored
+  server-side only as a SHA-256 hash in `refresh_tokens`. Sent as an httpOnly + Secure +
+  SameSite=Strict cookie scoped to `Path=/api/v1/auth`, so it only reaches the auth
+  endpoints. Rotated on every `/auth/refresh`.
+- **Reuse detection**: presenting an already-rotated token is rejected. If it was rotated
+  more than 30 s ago (`reuse-grace`) it's treated as stolen and *all* of that user's
+  refresh tokens are revoked; within the grace window (e.g. two tabs refreshing at once)
+  it's just rejected, so the other tab's fresh token keeps working.
+- **Logout** revokes the presented refresh token in the database and clears the cookie.
+  Access tokens aren't denylisted — they simply expire within 15 min.
+- The auth endpoints ignore any `Authorization` header, so the SPA can call
+  `/auth/refresh` with an expired access token still attached.
+- Expired/revoked rows are not cleaned up yet — a scheduled purge is a later
+  housekeeping task.
 
 ### 6.3 Authorization (private vs. shared data)
 
 - Every request carries the authenticated `userId` (from JWT) resolved server-side to
-  their current `activeFamilyId`.
+  their current family via `FamilyService.currentFamilyId(userId)` (§3.2).
 - Repository queries for `Account`/`Category`/`Budget`/`Transaction` are always scoped to
   `ownerType=USER AND ownerId=:userId OR ownerType=FAMILY AND ownerId=:activeFamilyId` —
   centralized in the service layer (§5.2) so no controller can accidentally leak
@@ -365,6 +397,8 @@ only changes those two beans.
 - Mutating a `FAMILY`-owned resource additionally checks the caller is a member (any
   role) of that family; family-management actions (invite, remove member, change role)
   require `ADMIN`.
+- A family always keeps at least one `ADMIN`: the last admin can't leave or be demoted
+  while other members remain. The last member leaving deletes the family.
 
 ### 6.4 Transport/infra
 

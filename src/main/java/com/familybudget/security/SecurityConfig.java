@@ -11,30 +11,67 @@ import org.springframework.boot.health.actuate.endpoint.HealthEndpoint;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestCustomizers;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.SimpleUrlAuthenticationFailureHandler;
+import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 /**
- * Stateless API security: every request outside the public endpoints must carry a
- * backend-issued JWT (ARCHITECTURE.md §6.1). Token validation uses Spring Security's
- * resource-server support rather than a hand-written filter. Login endpoints and token
- * issuance arrive in M7.
+ * Two filter chains (ARCHITECTURE.md §6.1):
+ * <ul>
+ * <li>Google login ({@code /oauth2/**}, {@code /login/oauth2/**}): Spring's
+ * {@code oauth2Login} with PKCE. It needs a session only to hold the authorization
+ * request across the redirect; the authenticated result is never stored, the success
+ * handler hands out our own refresh cookie instead.</li>
+ * <li>Everything else: stateless API where every request outside the public endpoints
+ * must carry a backend-issued JWT, validated by Spring Security's resource-server
+ * support rather than a hand-written filter.</li>
+ * </ul>
  */
 @Configuration(proxyBeanMethods = false)
 class SecurityConfig {
 
+	private static final String[] AUTH_PATHS = { "/api/v1/auth/register", "/api/v1/auth/login",
+			"/api/v1/auth/refresh", "/api/v1/auth/logout" };
+
 	@Bean
+	@Order(1)
+	SecurityFilterChain oauth2LoginSecurity(HttpSecurity http, ClientRegistrationRepository clientRegistrations,
+			OAuth2LoginSuccessHandler successHandler) throws Exception {
+		DefaultOAuth2AuthorizationRequestResolver authorizationRequestResolver = new DefaultOAuth2AuthorizationRequestResolver(
+				clientRegistrations, OAuth2AuthorizationRequestRedirectFilter.DEFAULT_AUTHORIZATION_REQUEST_BASE_URI);
+		authorizationRequestResolver.setAuthorizationRequestCustomizer(OAuth2AuthorizationRequestCustomizers.withPkce());
+		return http
+			.securityMatcher("/oauth2/**", "/login/oauth2/**")
+			.securityContext((context) -> context.securityContextRepository(new RequestAttributeSecurityContextRepository()))
+			.authorizeHttpRequests((auth) -> auth.anyRequest().permitAll())
+			.oauth2Login((login) -> login
+				.authorizationEndpoint((endpoint) -> endpoint.authorizationRequestResolver(authorizationRequestResolver))
+				.successHandler(successHandler)
+				.failureHandler(new SimpleUrlAuthenticationFailureHandler(successHandler.getFailureUrl())))
+			.build();
+	}
+
+	@Bean
+	@Order(2)
 	SecurityFilterChain apiSecurity(HttpSecurity http) throws Exception {
 		return http
 			.csrf((csrf) -> csrf.disable())
@@ -43,9 +80,22 @@ class SecurityConfig {
 			.authorizeHttpRequests((auth) -> auth
 				.requestMatchers(EndpointRequest.to(HealthEndpoint.class)).permitAll()
 				.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+				.requestMatchers(HttpMethod.POST, AUTH_PATHS).permitAll()
 				.anyRequest().authenticated())
-			.oauth2ResourceServer((resourceServer) -> resourceServer.jwt(Customizer.withDefaults()))
+			.oauth2ResourceServer((resourceServer) -> resourceServer
+				.bearerTokenResolver(bearerTokenResolver())
+				.jwt(Customizer.withDefaults()))
 			.build();
+	}
+
+	/**
+	 * Ignores the Authorization header on the auth endpoints, so an expired access token
+	 * sent along with {@code /auth/refresh} doesn't get the refresh itself rejected.
+	 */
+	private static BearerTokenResolver bearerTokenResolver() {
+		DefaultBearerTokenResolver delegate = new DefaultBearerTokenResolver();
+		return (request) -> request.getRequestURI().startsWith(RefreshTokenCookies.PATH + "/") ? null
+				: delegate.resolve(request);
 	}
 
 	@Bean

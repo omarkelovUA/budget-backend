@@ -11,6 +11,16 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            # Placeholders keep the app bootable without Google credentials; Google login
+            # itself only works once GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET are set.
+            client-id: ${GOOGLE_CLIENT_ID:not-configured}
+            client-secret: ${GOOGLE_CLIENT_SECRET:not-configured}
+            scope: openid,profile,email
 
 management:
   endpoints:
@@ -23,10 +33,21 @@ management:
         enabled: true
 
 app:
+  # Where the SPA lives; the Google login redirects back here (ARCHITECTURE.md §6.1).
+  frontend-url: ${FRONTEND_URL:http://localhost:4200}
   security:
     jwt:
       # HMAC key for signing/validating our own access tokens (ARCHITECTURE.md §6.1).
       # The default is for local dev only - always override JWT_SECRET outside it.
       secret: ${JWT_SECRET:dev-only-secret-change-me-at-least-32-bytes-long!!}
+      access-token-ttl: 15m
+    refresh-token:
+      ttl: 30d
+      # A rotated token replayed within this window (e.g. two tabs refreshing at once)
+      # is just rejected; replayed later, it revokes all of the user's sessions.
+      reuse-grace: 30s
+      cookie-secure: ${REFRESH_COOKIE_SECURE:true}
     cors:
       allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
+  family:
+    invite-ttl: 7d

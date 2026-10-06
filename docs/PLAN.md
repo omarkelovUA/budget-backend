@@ -1,6 +1,6 @@
 # Family Budget — Plan
 
-Status: draft v0.1 · 2026-10-05
+Status: draft v0.2 · 2026-10-06 (backend: M6 done, M7 done pending a manual Google login check)
 Companion doc: [ARCHITECTURE.md](./ARCHITECTURE.md) (system design this plan builds toward)
 
 ## 1. What we're building
@@ -103,6 +103,10 @@ it done.
   for the two-repo rationale): Spring Boot project, Postgres via Docker Compose, Flyway
   baseline migration, `common`/`security` scaffolding (no business logic yet).
 - Exit criteria: app boots, connects to Postgres, one health-check endpoint responds.
+- **Status: done (2026-10-06).** Verified against the Docker Compose Postgres (Flyway
+  applied, `/actuator/health` → `UP`, `/api/v1/*` → 401 without a token) and in
+  Testcontainers tests. V2 adds the Spring Modulith event-publication tables Hibernate
+  validates against.
 
 ### M7 — Backend: user, family, auth
 - `user` + `family` modules (entities, migrations, services, controllers).
@@ -111,6 +115,17 @@ it done.
 - Exit criteria: register, password-login, Google-login and family invite/join all work
   end-to-end via API tests (Postman/HTTP files or integration tests) — frontend not
   wired yet.
+- **Status: implemented (2026-10-06).** Integration tests (Testcontainers) cover register,
+  password login, refresh rotation + reuse detection, logout, Google login (success
+  handler driven with a mocked OIDC user, PKCE redirect checked) and family
+  create/invite/join/leave/remove/role change.
+  - Remaining for exit: one real Google sign-in. Needs an OAuth client in Google Cloud
+    Console (redirect URI `http://localhost:8080/login/oauth2/code/google`) and
+    `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` set when starting the app.
+  - Decisions taken: invite codes rather than email invites; opaque hashed refresh
+    tokens; no `activeFamilyId` column (membership row is the source of truth);
+    no MapStruct yet; `/api/v1` written into mappings. Details in ARCHITECTURE.md
+    §3.2, §5, §6.2.
 
 ### M8 — Backend: account/category/transaction/budget
 - Remaining modules, authorization scoping (private vs. family) enforced per
@@ -152,9 +167,9 @@ flagging now so they're not a surprise mid-phase.
 
 | # | Decision | Needed by | Leaning |
 |---|---|---|---|
-| 1 | Second repo name/location for the backend (`budget-app-backend`?), and whether these two docs move there too once it exists. | M6 | Proposed name above; open to the user's preference. |
+| 1 | ~~Second repo name/location for the backend, and whether these two docs move there too.~~ **Decided:** GitHub `omarkelovUA/budget-backend` (local folder `budget-app-backend`); the docs live in the backend repo. | M6 | Done. |
 | 2 | `ownerType/ownerId` on the wire vs. a simpler derived `visibility: 'private'\|'shared'` sent to the frontend (backend still models ownerType/ownerId internally either way). | M3 | Lean simple (`visibility`) on the frontend DTOs; keep the richer model server-side only. |
-| 3 | OAuth2 providers beyond Google for v1 (e.g. add Microsoft/Apple) or Google-only to start. | M7 | Google-only to start, per the user's original ask; others are additive later. |
+| 3 | OAuth2 providers beyond Google for v1 (e.g. add Microsoft/Apple) or Google-only to start. | M7 | M7 implemented Google only, per the user's original ask. Adding another provider later is additive (another `oauth2Login` registration + find-or-create path). |
 | 4 | Hosting/deployment target (self-hosted VM, Fly.io/Railway, cloud provider) — affects M10 only, not the architecture itself. | M10 | No leaning yet — not urgent. |
 
 ## 8. Next step
