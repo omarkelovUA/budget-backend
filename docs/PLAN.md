@@ -1,6 +1,6 @@
   # Family Budget — Plan
 
-Status: draft v0.4 · 2026-10-06 (M6, M8 done; M7 and M9 done pending manual Google login / browser checks)
+Status: draft v0.5 · 2026-10-06 (all milestones implemented; open: manual Google login and browser checks — see M7, M9, M10)
 Companion doc: [ARCHITECTURE.md](./ARCHITECTURE.md) (system design this plan builds toward)
 
 ## 1. What we're building
@@ -168,9 +168,9 @@ it done.
     invite/join, shared account, payment, budget fact, refresh on reload, logout).
   - Remaining for exit: a manual click-through in a browser (not done — browser
     automation wasn't available), plus the Google sign-in from M7.
-  - Known gaps, for M10: no paging UI (transaction list shows the newest 200); delete
-    errors on list pages only reach the console; no "leave family" UI; dashboard still
-    a placeholder. If a browser drops the `Secure` refresh cookie on
+  - Known gaps, handed to M10 (all closed there except the dashboard): no paging UI;
+    delete errors on list pages only reach the console; no "leave family" UI; dashboard
+    still a placeholder. If a browser drops the `Secure` refresh cookie on
     `http://localhost`, run the backend with `REFRESH_COOKIE_SECURE=false`.
   - Local dev: `ng serve` needs Node 22+ and proxies `/api`, `/oauth2`,
     `/login/oauth2` to `localhost:8080` (`src/proxy.conf.json`).
@@ -181,6 +181,25 @@ it done.
   `docker-compose up` path.
 - Exit criteria: a stranger can clone both repos and get a working local instance from
   the READMEs alone.
+- **Status: implemented (2026-10-06)** — backend `de100a6`, frontend `d1adb6b` on `dev`.
+  - Infra: multi-stage backend `Dockerfile`; `docker compose --profile app up --build`
+    runs Postgres + backend with only Docker installed (verified: image builds, health
+    `UP`, register works); GitHub Actions CI in both repos (backend `./mvnw verify` +
+    image build, frontend `npm ci` + build + tests, Node pinned by `.nvmrc`); both
+    READMEs rewritten as the setup guide.
+  - Backend hardening: 401/403 from the security filters return `ProblemDetail`; daily
+    purge of expired refresh tokens.
+  - Frontend hardening: save/delete errors shown in the UI; responsive header, grids
+    and transaction rows; a11y pass (linked labels, named radio groups, cards as
+    buttons, named icon buttons, status/alert roles, focus ring, reduced motion,
+    `lang="uk"`); transaction paging, account delete, leave family. Interceptor no
+    longer refreshes twice when a 401 arrives after another request already refreshed.
+  - Tests: backend green under `verify`; frontend 19 unit tests (new: error mapping,
+    interceptor refresh/retry incl. concurrent 401s, list paging).
+  - Remaining for exit: a fresh-clone run-through following only the READMEs, and a
+    browser check of layout/keyboard use (browser automation wasn't available). The
+    two paths were verified separately from the working trees.
+  - Still open: dashboard is a placeholder; CI hasn't been watched on GitHub yet.
 
 ## 6. Deferred (by explicit request)
 
@@ -190,7 +209,7 @@ real code exists to ground them in:
 - Project-level CLAUDE.md / AGENTS.md rules beyond what already exists in `.junie/AGENTS.md`.
 - Claude Code skills tailored to this project.
 - Lint/formatting rule changes beyond current `.prettierrc`/`.editorconfig`.
-- CI pipeline definitions.
+- ~~CI pipeline definitions.~~ Added in M10 (basic build + test only).
 
 ## 7. Open decisions
 

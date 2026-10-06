@@ -1,6 +1,6 @@
 # Family Budget — Architecture
 
-Status: draft v0.5 · 2026-10-06
+Status: draft v0.6 · 2026-10-06
 Companion doc: [PLAN.md](./PLAN.md) (roadmap, phases, open decisions)
 
 ## 1. Purpose
@@ -387,8 +387,9 @@ Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `invalid-transaction`, `currency-mismatch`, `transaction-not-editable`,
 `category-not-shared`, `budget-exists`.
 
-Known gap: 401s raised by the resource server itself (missing/invalid access token) still
-have an empty body rather than a `ProblemDetail`.
+401/403 raised by the security filters themselves (missing/invalid access token) get the
+same shape (`unauthenticated` / `forbidden`) via custom entry point and access-denied
+handlers, alongside the standard `WWW-Authenticate: Bearer …` header.
 
 ## 6. Security design
 
@@ -452,8 +453,9 @@ only changes those two beans.
   Access tokens aren't denylisted — they simply expire within 15 min.
 - The auth endpoints ignore any `Authorization` header, so the SPA can call
   `/auth/refresh` with an expired access token still attached.
-- Expired/revoked rows are not cleaned up yet — a scheduled purge is a later
-  housekeeping task.
+- A daily job (`RefreshTokenCleanup`, cron `app.security.refresh-token.cleanup-cron`)
+  deletes tokens past their expiry. Revoked-but-unexpired rows are kept deliberately:
+  replaying one is what triggers reuse detection.
 
 ### 6.3 Authorization (private vs. shared data)
 
@@ -471,8 +473,17 @@ only changes those two beans.
 
 ### 6.4 Transport/infra
 
-- HTTPS everywhere (even local dev via mkcert, to catch cookie/`Secure` issues early).
-- CORS restricted to the known frontend origin(s) per environment.
+- HTTPS in any deployed environment. Local dev runs on plain `http://localhost`: browsers
+  treat localhost as a secure context, so the `Secure` refresh cookie still works there
+  (`REFRESH_COOKIE_SECURE=false` is the escape hatch). mkcert was the original idea and
+  turned out unnecessary.
+- CORS restricted to the known frontend origin(s) per environment; unused in local dev,
+  where `ng serve` proxies the API so everything is same-origin.
+- Packaging: multi-stage `Dockerfile` (JDK build → layered JRE runtime, non-root user).
+  `compose.yaml` runs Postgres for `spring-boot:run`, plus the backend itself behind the
+  opt-in `app` profile. Deployment target is still open (PLAN.md open decision #4).
+- CI: GitHub Actions in each repo — backend `./mvnw verify` (Testcontainers on the
+  runner's Docker) and an image build; frontend build + unit tests.
 
 ## 7. Explicit v1 simplifications (revisit later, not now)
 
