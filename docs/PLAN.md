@@ -1,6 +1,6 @@
-# Family Budget — Plan
+  # Family Budget — Plan
 
-Status: draft v0.2 · 2026-10-06 (backend: M6 done, M7 done pending a manual Google login check)
+Status: draft v0.3 · 2026-10-06 (backend: M6 done, M7 done pending a manual Google login check, M8 done)
 Companion doc: [ARCHITECTURE.md](./ARCHITECTURE.md) (system design this plan builds toward)
 
 ## 1. What we're building
@@ -133,6 +133,17 @@ it done.
 - Integration tests with Testcontainers covering the private/shared visibility rule —
   this is the rule most likely to regress silently, so it gets explicit test coverage.
 - Exit criteria: full API surface for all domains, tested.
+- **Status: done (2026-10-06).** Accounts, categories, transactions (paged) and budgets,
+  each with integration tests (Testcontainers); dedicated cases for the visibility rule
+  (owner only, family members, outsiders, former members) and for derived transaction
+  visibility/editability. 49 tests green, module boundaries verified.
+  - Decisions taken (details in ARCHITECTURE.md §3.2, §3.3, §5.3): wire format follows
+    the frontend types (`visibility`, lower-case enums, also applied to M7's family
+    roles); balances move with transactions; transactions are immutable; visibility and
+    category type are fixed at creation; `factAmount` computed on read (private budget =
+    owner's payments, shared = all members'); same-currency transfers only.
+  - Follow-ups: clean up a deleted family's shared data via a `FamilyDeleted` event;
+    `SYSTEM` default categories (needs a frontend visibility value).
 
 ### M9 — Frontend ↔ backend integration
 - Swap each domain's mock repository for its `Http*Repository` implementation, one
@@ -168,7 +179,7 @@ flagging now so they're not a surprise mid-phase.
 | # | Decision | Needed by | Leaning |
 |---|---|---|---|
 | 1 | ~~Second repo name/location for the backend, and whether these two docs move there too.~~ **Decided:** GitHub `omarkelovUA/budget-backend` (local folder `budget-app-backend`); the docs live in the backend repo. | M6 | Done. |
-| 2 | `ownerType/ownerId` on the wire vs. a simpler derived `visibility: 'private'\|'shared'` sent to the frontend (backend still models ownerType/ownerId internally either way). | M3 | Lean simple (`visibility`) on the frontend DTOs; keep the richer model server-side only. |
+| 2 | `ownerType/ownerId` on the wire vs. a simpler derived `visibility: 'private'\|'shared'` sent to the frontend (backend still models ownerType/ownerId internally either way). | M3 | Implemented per the leaning in M8: the API sends `visibility`; `ownerType`/`ownerId` stay server-side. |
 | 3 | OAuth2 providers beyond Google for v1 (e.g. add Microsoft/Apple) or Google-only to start. | M7 | M7 implemented Google only, per the user's original ask. Adding another provider later is additive (another `oauth2Login` registration + find-or-create path). |
 | 4 | Hosting/deployment target (self-hosted VM, Fly.io/Railway, cloud provider) — affects M10 only, not the architecture itself. | M10 | No leaning yet — not urgent. |
 

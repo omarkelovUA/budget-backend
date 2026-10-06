@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.familybudget.common.AccessScope;
 import com.familybudget.common.ApiException;
 import com.familybudget.common.NotFoundException;
 import com.familybudget.user.UserService;
@@ -58,6 +59,10 @@ public class FamilyService {
 	/** The caller's family, used by later modules to scope shared data (ARCHITECTURE.md §6.3). */
 	public Optional<UUID> currentFamilyId(UUID userId) {
 		return this.members.findById(userId).map(FamilyMemberEntity::getFamilyId);
+	}
+
+	public AccessScope scopeFor(UUID userId) {
+		return new AccessScope(userId, currentFamilyId(userId).orElse(null));
 	}
 
 	public FamilyView current(UUID userId) {

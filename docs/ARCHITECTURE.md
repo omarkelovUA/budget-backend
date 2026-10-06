@@ -1,6 +1,6 @@
 # Family Budget — Architecture
 
-Status: draft v0.3 · 2026-10-06
+Status: draft v0.4 · 2026-10-06
 Companion doc: [PLAN.md](./PLAN.md) (roadmap, phases, open decisions)
 
 ## 1. Purpose
@@ -95,8 +95,8 @@ erDiagram
     }
     CATEGORY {
         uuid id
-        enum ownerType "USER | FAMILY | SYSTEM"
-        uuid ownerId "null for SYSTEM"
+        enum ownerType "USER | FAMILY (SYSTEM deferred)"
+        uuid ownerId
         enum type "INCOME | EXPENSE"
         string name
         string icon
@@ -121,7 +121,7 @@ erDiagram
         uuid categoryId
         string period "YYYY-MM"
         decimal plannedAmount
-        decimal factAmount "cached, recomputed from transactions"
+        decimal factAmount "computed on read, not stored"
     }
 ```
 
@@ -137,7 +137,39 @@ Every shareable aggregate (`Account`, `Category`, `Budget`) carries `ownerType` 
 This single polymorphic-owner pattern avoids duplicating each table into
 `*_private` / `*_shared` variants and keeps authorization logic in one place
 (see §6.3). `Transaction` has no owner of its own — its visibility is derived from the
-account(s) it touches.
+account(s) it touches:
+
+- **Visible** to anyone who can see *at least one* of its accounts, and reported as
+  `shared` if any of them is shared. A family member therefore sees Alice's transfer from
+  her private card into the family account, with the card shown as a reference (name,
+  currency, icon, color — never its balance).
+- **Deletable** only by someone who can access *all* of its accounts; otherwise
+  `403 transaction-not-editable`. Transactions are immutable — correcting one means
+  deleting and re-creating it. Recording or deleting a transaction adjusts the touched
+  balances in the same database transaction (atomic `balance = balance + delta`).
+- A payment's direction comes from its category type (income adds, expense subtracts);
+  amounts are always positive. Transfers require both accounts to share a currency.
+
+Other ownership rules:
+
+- An aggregate's visibility (private/shared) is fixed at creation
+  (`409 visibility-immutable`), since flipping it would silently change who sees its
+  history. A category's income/expense type is fixed too, because it determines what past
+  payments did to balances.
+- Creating something `shared` without a family fails with `409 no-family`.
+- Accounts and categories that are still referenced (transactions, budgets) can't be
+  deleted (`409 account-in-use` / `category-in-use`), enforced by foreign keys.
+- `owner_id` has no foreign key (it points at users *or* families). Deleting a family
+  (its last member leaving) currently leaves its shared data orphaned — to be fixed with a
+  `FamilyDeleted` application event (Spring Modulith's event registry is already set up).
+- `SYSTEM`-owned default categories are deferred: the frontend's `Visibility` type has no
+  value to show them with.
+
+**Budgets** are monthly, one per owner/category/month. `factAmount` is the sum of the
+category's payments in that month, computed on every read (indexed on
+`(category_id, occurred_on)`): a **private** budget counts only its owner's own payments,
+a **shared** budget counts every member's. A shared budget must use a shared category, so
+every member can see what it tracks.
 
 A user belongs to at most one family in v1. There is no `activeFamilyId` column on the
 user: `family_members` is keyed by `user_id`, so the membership row *is* the user's
@@ -150,11 +182,22 @@ back an explicit active-family choice.
 
 ### 3.3 Relationship to current frontend types
 
-`src/app/model/types.ts` already has `IAccount`, `ICategory`, `Transaction`. They map
-almost directly onto §3.1 but currently have no owner/visibility field. Phase F2 in the
-plan extends them with `ownerType`/`ownerId` (or a simpler `visibility: 'private' | 'shared'`
-derived client-side) before the sharing UI is built — see
-[PLAN.md](./PLAN.md).
+The API follows the frontend's `model/types.ts` (as of M8) rather than the database
+shape: `visibility: 'private' | 'shared'` instead of `ownerType`/`ownerId`, and
+lower-case enum values (`'income'`, `'payment'`, `'admin'`, …). Differences the M9
+integration has to absorb:
+
+- Ids are UUID strings, not `number`.
+- Transaction `date` is an ISO `YYYY-MM-DD` string; transactions also carry `kind`
+  (`'payment' | 'transfer'`), `note` and `recordedBy`. Their accounts are `AccountRef`s
+  (no `balance`), and the unused pair (`account`/`category` vs. `fromAccount`/`toAccount`)
+  is omitted from the JSON, so the frontend's `isTransferTransaction` check still works.
+- Creating a transaction sends ids (`accountId` + `categoryId`, or `fromAccountId` +
+  `toAccountId`) plus `kind`, not embedded objects.
+- Creating/updating a budget sends `categoryId`, not an embedded category.
+- `GET /transactions` returns a page wrapper (§5.3), not a bare array.
+- The current user (`GET /users/me`) has no `familyId`; the family comes from
+  `GET /families/current` (404 when there is none).
 
 ## 4. Frontend architecture (Angular)
 
@@ -294,7 +337,9 @@ is declared an *open* module since every feature uses it.
 
 ### 5.3 API conventions
 
-- Base path `/api/v1`, resource-oriented REST (`GET/POST/PATCH/DELETE /accounts`, etc.).
+- Base path `/api/v1`, resource-oriented REST. Full-object updates use `PUT` (the
+  frontend's repositories send whole objects); `PATCH` is used only for genuinely partial
+  changes (a family member's role).
   Decided in M7: `/api/v1` is written directly into each `@RequestMapping`. Spring
   Framework 7's API versioning would need a `{version}` segment in every mapping anyway and
   buys nothing until a `v2` exists; the URL shape is the same either way.
@@ -303,8 +348,10 @@ is declared an *open* module since every feature uses it.
   query params.
 - Errors as RFC 9457 `ProblemDetail` with a stable `type` URI the frontend can switch on
   (not just an HTTP status), e.g. `https://familybudget.app/problems/email-taken`.
-- Pagination via `page`/`size` query params + `Page<T>` response wrapper for
-  transaction lists.
+- Pagination via `page`/`size` query params (size 1–200, default 50) on transaction
+  lists, returning `{content, page, size, totalElements, totalPages}` — our own
+  `PageView` record, not Spring Data's `Page` JSON. Other lists are small and unpaged.
+- Money is JSON numbers with two decimals (`NUMERIC(19,2)` in the database).
 
 ### 5.4 Error handling
 
@@ -316,7 +363,10 @@ Frontend's HTTP error interceptor (§4.4) depends on this shape being stable fro
 
 Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `invalid-refresh-token`, `email-not-verified`, `unauthenticated`, `already-in-family`,
-`invalid-invite`, `admin-required`, `last-admin`, `cannot-remove-self`.
+`invalid-invite`, `admin-required`, `last-admin`, `cannot-remove-self`, `no-family`,
+`visibility-immutable`, `category-type-immutable`, `account-in-use`, `category-in-use`,
+`invalid-transaction`, `currency-mismatch`, `transaction-not-editable`,
+`category-not-shared`, `budget-exists`.
 
 Known gap: 401s raised by the resource server itself (missing/invalid access token) still
 have an empty body rather than a `ProblemDetail`.
@@ -411,8 +461,9 @@ only changes those two beans.
 - Single currency assumed per account; no cross-currency conversion/FX.
 - Budgets are monthly (`period = YYYY-MM`); no custom date ranges yet.
 - No recurring-transaction scheduler.
-- `Budget.factAmount` is a cached/recomputed value, not transactionally maintained on
-  every write — acceptable staleness window, revisit if it causes visible lag.
+- `Budget.factAmount` is computed on read (one aggregate query per budget) instead of
+  cached — always correct, cheap at v1 volumes; cache it only if budget lists get slow.
+- Transactions are create/delete only; no in-place edits.
 
 ## 8. Key decisions & why
 

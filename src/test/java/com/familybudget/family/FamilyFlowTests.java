@@ -30,7 +30,7 @@ class FamilyFlowTests {
 		MvcTestResult created = createFamily(alice, "Smiths");
 		assertThat(created).hasStatus(HttpStatus.CREATED);
 		assertThat(created).bodyJson().extractingPath("$.name").isEqualTo("Smiths");
-		assertThat(created).bodyJson().extractingPath("$.members[0].role").isEqualTo("ADMIN");
+		assertThat(created).bodyJson().extractingPath("$.members[0].role").isEqualTo("admin");
 
 		assertThat(createFamily(alice, "Second")).hasStatus(HttpStatus.CONFLICT)
 			.bodyJson()
@@ -57,7 +57,7 @@ class FamilyFlowTests {
 		assertThat(joined).hasStatusOk();
 		assertThat(joined).bodyJson().extractingPath("$.members.length()").isEqualTo(2);
 		assertThat(joined).bodyJson().extractingPath("$.members[1].email").isEqualTo(bob.email());
-		assertThat(joined).bodyJson().extractingPath("$.members[1].role").isEqualTo("MEMBER");
+		assertThat(joined).bodyJson().extractingPath("$.members[1].role").isEqualTo("member");
 
 		assertThat(join(carol, code)).hasStatus(HttpStatus.NOT_FOUND)
 			.bodyJson()
@@ -102,7 +102,7 @@ class FamilyFlowTests {
 			.header(HttpHeaders.AUTHORIZATION, alice.bearer())
 			.contentType(MediaType.APPLICATION_JSON)
 			.content("""
-					{"role": "ADMIN"}
+					{"role": "admin"}
 					""")).hasStatusOk();
 		assertThat(post(alice, "/api/v1/families/current/leave")).hasStatus(HttpStatus.NO_CONTENT);
 		assertThat(get(bob, "/api/v1/families/current")).bodyJson()
