@@ -1,45 +1,85 @@
 # Family Budget — Backend
 
-Spring Boot 4.1 / Java 25 REST API for the Family Budget app. Frontend:
-[`budget-app-front`](../budget-app-front). Architecture and roadmap live in
-`../budget-app-front/docs/` (ARCHITECTURE.md, PLAN.md).
+REST API for Family Budget: private and family-shared accounts, categories, transactions
+and monthly budgets. Spring Boot 4.1 / Java 25 modular monolith on PostgreSQL 18.
 
-## Prerequisites
+- Frontend: [`budget-front`](https://github.com/omarkelovUA/budget-front) (Angular 22)
+- Design and roadmap: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md),
+  [`docs/PLAN.md`](docs/PLAN.md)
 
-- JDK 25+
-- Docker (with your user able to run `docker` without sudo) — used for local Postgres and
-  for Testcontainers in tests.
+## Quick start (Docker only)
 
-## Run locally
+Needs only Docker. Starts Postgres and the backend on <http://localhost:8080>:
+
+```bash
+docker compose --profile app up --build
+```
+
+Check it: <http://localhost:8080/actuator/health> → `{"status":"UP"}`. Then start the
+frontend (see its README) and register a user in the UI.
+
+Stop with `Ctrl+C`; `docker compose --profile app down` removes the containers but keeps
+the database volume (`down -v` wipes it).
+
+## Developing
+
+Prerequisites: JDK 25+ and Docker (runnable without `sudo`).
 
 ```bash
 ./mvnw spring-boot:run
 ```
 
-`spring-boot-docker-compose` starts Postgres from `compose.yaml` automatically and wires
-the datasource; Flyway applies `src/main/resources/db/migration` on startup.
-
-Health check (public): <http://localhost:8080/actuator/health>. Every other endpoint
-requires a `Bearer` JWT.
-
-## Test
+`spring-boot-docker-compose` starts only Postgres from `compose.yaml` (the `app` service
+is behind a profile) and wires the datasource. Flyway applies
+`src/main/resources/db/migration` on startup.
 
 ```bash
-./mvnw test
+./mvnw test      # unit + integration tests (Testcontainers starts a throwaway Postgres)
+./mvnw verify    # what CI runs
 ```
 
-Integration tests start a throwaway Postgres via Testcontainers. `ModularityTests`
-verifies module boundaries (Spring Modulith) and writes module docs to
-`target/spring-modulith-docs`.
+`ModularityTests` fails the build if a module reaches into another module's internals,
+and writes module diagrams to `target/spring-modulith-docs`.
 
 ## Configuration
 
+All optional for local use; the defaults work out of the box.
+
 | Env var | Default | Purpose |
 |---|---|---|
-| `JWT_SECRET` | dev-only value | HMAC key for access tokens (≥ 32 bytes). Must be set outside local dev. |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Comma-separated frontend origins. |
+| `JWT_SECRET` | dev-only value | HMAC key for access tokens (≥ 32 bytes). **Set it anywhere but your machine.** |
+| `FRONTEND_URL` | `http://localhost:4200` | Where the Google login redirects back to. |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Comma-separated origins allowed to call the API directly (not needed behind the frontend's dev proxy). |
+| `REFRESH_COOKIE_SECURE` | `true` | `Secure` flag on the refresh cookie. Chrome accepts it on `http://localhost`; set `false` if your browser drops it. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | placeholder | Enables "Login with Google". Without them everything else works. |
+
+### Google login (optional)
+
+1. In Google Cloud Console create an OAuth client ID of type *Web application*.
+2. Add the redirect URI `http://localhost:4200/login/oauth2/code/google` (the frontend's
+   dev server proxies it here). Use `http://localhost:8080/login/oauth2/code/google`
+   only if you open the backend directly.
+3. Start the backend with `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` set.
+
+## API overview
+
+All under `/api/v1`, JSON, errors as RFC 9457 `ProblemDetail` with a stable `type` (see
+ARCHITECTURE.md §5.4). Everything except `/auth/*` and `/actuator/health` needs
+`Authorization: Bearer <access token>`.
+
+| Area | Endpoints |
+|---|---|
+| Auth | `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`; Google via `/oauth2/authorization/google` |
+| User | `GET /users/me` |
+| Family | `POST /families`, `GET /families/current`, `POST /families/current/invites`, `POST /families/join`, `POST /families/current/leave`, `PATCH`/`DELETE /families/current/members/{userId}` |
+| Accounts | `GET`/`POST /accounts`, `GET`/`PUT`/`DELETE /accounts/{id}` |
+| Categories | `GET`/`POST /categories`, `PUT`/`DELETE /categories/{id}` |
+| Transactions | `GET /transactions?page&size&accountId`, `POST /transactions`, `DELETE /transactions/{id}` |
+| Budgets | `GET /budgets?period=YYYY-MM`, `POST /budgets`, `PUT`/`DELETE /budgets/{id}` |
 
 ## Layout
 
-Package-by-feature modular monolith (`com.familybudget`): `common`, `security` today;
-`user`, `family`, `account`, `category`, `transaction`, `budget` arrive in M7–M8.
+Package-by-feature (`com.familybudget`), one Spring Modulith module each: `common`,
+`security`, `user`, `family`, `account`, `category`, `transaction`, `budget`. Only a
+module's `*Service` and view records are public; repositories and entities are
+package-private.

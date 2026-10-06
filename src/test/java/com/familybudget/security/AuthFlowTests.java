@@ -26,6 +26,9 @@ class AuthFlowTests {
 	@Autowired
 	private JdbcTemplate jdbc;
 
+	@Autowired
+	private RefreshTokenCleanup cleanup;
+
 	@Test
 	void registerIssuesAccessTokenAndHardenedRefreshCookie() {
 		String email = TestUsers.uniqueEmail();
@@ -95,9 +98,32 @@ class AuthFlowTests {
 	}
 
 	@Test
-	void invalidAccessTokenIsRejected() {
-		assertThat(this.mvc.get().uri("/api/v1/users/me").header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt"))
-			.hasStatus(HttpStatus.UNAUTHORIZED);
+	void invalidOrMissingAccessTokenGetsAProblemResponse() {
+		for (MvcTestResult result : new MvcTestResult[] {
+				this.mvc.get().uri("/api/v1/users/me").header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt").exchange(),
+				this.mvc.get().uri("/api/v1/users/me").exchange() }) {
+			assertThat(result).hasStatus(HttpStatus.UNAUTHORIZED);
+			assertThat(result.getResponse().getHeader(HttpHeaders.WWW_AUTHENTICATE)).startsWith("Bearer");
+			assertThat(result).hasContentType(MediaType.APPLICATION_PROBLEM_JSON);
+			assertThat(result).bodyJson()
+				.extractingPath("$.type")
+				.isEqualTo("https://familybudget.app/problems/unauthenticated");
+		}
+	}
+
+	@Test
+	void cleanupPurgesExpiredRefreshTokensButKeepsRevokedOnes() {
+		Session expired = TestUsers.register(this.mvc);
+		Session rotated = TestUsers.register(this.mvc);
+		refresh(rotated.refreshCookie());
+		this.jdbc.update("update refresh_tokens set expires_at = now() - interval '1 day' where user_id = ?",
+				expired.userId());
+
+		this.cleanup.purgeExpired();
+
+		assertThat(countTokens(expired)).isZero();
+		// The rotated (revoked) token stays, so replaying it can still be detected.
+		assertThat(countTokens(rotated)).isEqualTo(2);
 	}
 
 	@Test
@@ -176,6 +202,11 @@ class AuthFlowTests {
 
 	private MvcTestResult refresh(Cookie cookie) {
 		return this.mvc.post().uri("/api/v1/auth/refresh").cookie(cookie).exchange();
+	}
+
+	private Integer countTokens(Session session) {
+		return this.jdbc.queryForObject("select count(*) from refresh_tokens where user_id = ?", Integer.class,
+				session.userId());
 	}
 
 	private static Session sessionFrom(MvcTestResult result) {

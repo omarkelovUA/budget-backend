@@ -1,4 +1,8 @@
-# Local-dev Postgres. Started automatically by spring-boot-docker-compose on `./mvnw spring-boot:run`.
+# Local Postgres. Started automatically by spring-boot-docker-compose on `./mvnw spring-boot:run`.
+#
+# The `app` service is opt-in (profile), so spring-boot:run keeps starting only Postgres.
+# To run the whole backend in Docker instead - no JDK needed:
+#   docker compose --profile app up --build
 services:
   postgres:
     image: 'postgres:18-alpine'
@@ -10,6 +14,31 @@ services:
       - '5432:5432'
     volumes:
       - 'postgres-data:/var/lib/postgresql'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U familybudget -d familybudget']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  app:
+    profiles: ['app']
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: 'jdbc:postgresql://postgres:5432/familybudget'
+      SPRING_DATASOURCE_USERNAME: 'familybudget'
+      SPRING_DATASOURCE_PASSWORD: 'familybudget'
+      SPRING_DOCKER_COMPOSE_ENABLED: 'false'
+      # Optional, forwarded from your shell when set (see README).
+      JWT_SECRET: '${JWT_SECRET:-dev-only-secret-change-me-at-least-32-bytes-long!!}'
+      GOOGLE_CLIENT_ID: '${GOOGLE_CLIENT_ID:-not-configured}'
+      GOOGLE_CLIENT_SECRET: '${GOOGLE_CLIENT_SECRET:-not-configured}'
+      FRONTEND_URL: '${FRONTEND_URL:-http://localhost:4200}'
+      REFRESH_COOKIE_SECURE: '${REFRESH_COOKIE_SECURE:-true}'
+    ports:
+      - '8080:8080'
 
 volumes:
   postgres-data:

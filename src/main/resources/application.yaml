@@ -47,6 +47,8 @@ app:
       # is just rejected; replayed later, it revokes all of the user's sessions.
       reuse-grace: 30s
       cookie-secure: ${REFRESH_COOKIE_SECURE:true}
+      # Daily purge of expired refresh tokens (RefreshTokenCleanup).
+      cleanup-cron: '0 30 3 * * *'
     cors:
       allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
   family:

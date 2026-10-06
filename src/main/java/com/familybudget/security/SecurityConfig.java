@@ -82,8 +82,13 @@ class SecurityConfig {
 				.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 				.requestMatchers(HttpMethod.POST, AUTH_PATHS).permitAll()
 				.anyRequest().authenticated())
+			.exceptionHandling((exceptions) -> exceptions
+				.authenticationEntryPoint(ProblemResponses.authenticationEntryPoint())
+				.accessDeniedHandler(ProblemResponses.accessDeniedHandler()))
 			.oauth2ResourceServer((resourceServer) -> resourceServer
 				.bearerTokenResolver(bearerTokenResolver())
+				.authenticationEntryPoint(ProblemResponses.authenticationEntryPoint())
+				.accessDeniedHandler(ProblemResponses.accessDeniedHandler())
 				.jwt(Customizer.withDefaults()))
 			.build();
 	}

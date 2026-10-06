@@ -32,7 +32,10 @@ class BudgetAppBackendApplicationTests {
 
 	@Test
 	void apiRequiresAuthentication() {
-		assertThat(this.mvc.get().uri("/api/v1/accounts")).hasStatus(HttpStatus.UNAUTHORIZED);
+		assertThat(this.mvc.get().uri("/api/v1/accounts")).hasStatus(HttpStatus.UNAUTHORIZED)
+			.bodyJson()
+			.extractingPath("$.status")
+			.isEqualTo(401);
 	}
 
 }
