@@ -1,6 +1,6 @@
   # Family Budget — Plan
 
-Status: draft v0.5 · 2026-10-06 (all milestones implemented; open: manual Google login and browser checks — see M7, M9, M10)
+Status: draft v0.6 · 2026-10-06 (all milestones implemented, dashboard included; open: manual Google login and browser checks — see M7, M9, M10)
 Companion doc: [ARCHITECTURE.md](./ARCHITECTURE.md) (system design this plan builds toward)
 
 ## 1. What we're building
@@ -199,7 +199,11 @@ it done.
   - Remaining for exit: a fresh-clone run-through following only the READMEs, and a
     browser check of layout/keyboard use (browser automation wasn't available). The
     two paths were verified separately from the working trees.
-  - Still open: dashboard is a placeholder; CI hasn't been watched on GitHub yet.
+  - Dashboard (built after M10, 2026-10-06): per-currency balances (private/shared),
+    month income/expense/net with a month switcher, the month's budgets (over-budget
+    first), last 5 transactions; backed by a new `GET /transactions/summary?period=`.
+  - Still open: CI hasn't been watched on GitHub yet; the dashboard formats money with
+    `Intl` (`uk-UA`) while the list pages show plain numbers — align later.
 
 ## 6. Deferred (by explicit request)
 

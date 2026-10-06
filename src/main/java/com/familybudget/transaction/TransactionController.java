@@ -1,5 +1,7 @@
 package com.familybudget.transaction;
 
+import java.time.YearMonth;
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.validation.Valid;
@@ -35,6 +37,12 @@ class TransactionController {
 			@RequestParam(defaultValue = "0") @Min(0) int page,
 			@RequestParam(defaultValue = "50") @Min(1) @Max(200) int size) {
 		return this.transactionService.list(userId, accountId, page, size);
+	}
+
+	/** Dashboard totals: {@code ?period=YYYY-MM}. */
+	@GetMapping("/summary")
+	List<MonthSummaryView> summary(@CurrentUserId UUID userId, @RequestParam YearMonth period) {
+		return this.transactionService.monthSummary(userId, period);
 	}
 
 	@PostMapping

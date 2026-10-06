@@ -162,6 +162,40 @@ class TransactionFlowTests {
 	}
 
 	@Test
+	void monthSummaryCountsVisiblePaymentsPerCurrencyAndSkipsTransfers() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		this.api.family(alice, bob);
+		UUID alicesCard = this.api.account(alice, "Alice card", "1000", "private");
+		UUID cash = this.api.account(alice, "Family cash", "1000", "shared");
+		UUID dollars = TestApi.id(this.api.createAccount(alice, "USD", "1000", "USD", "shared"));
+		UUID food = this.api.category(alice, "expense", "Food", "shared");
+		UUID salary = this.api.category(alice, "income", "Salary", "shared");
+		this.api.pay(alice, alicesCard, food, "10", "2026-10-01");
+		this.api.pay(alice, cash, food, "20", "2026-10-31");
+		this.api.pay(alice, cash, salary, "500", "2026-10-15");
+		this.api.pay(alice, dollars, food, "7", "2026-10-15");
+		this.api.pay(alice, cash, food, "99", "2026-11-01");
+		this.api.transfer(alice, alicesCard, cash, "300");
+
+		assertThat(this.api.get(alice, "/api/v1/transactions/summary?period=2026-10")).bodyJson()
+			.isLenientlyEqualTo("""
+					[{"currency": "UAH", "income": 500.00, "expense": 30.00},
+					 {"currency": "USD", "income": 0, "expense": 7.00}]
+					""");
+		// Bob can't see Alice's private card, so its payment isn't in his totals.
+		assertThat(this.api.get(bob, "/api/v1/transactions/summary?period=2026-10")).bodyJson()
+			.isLenientlyEqualTo("""
+					[{"currency": "UAH", "income": 500.00, "expense": 20.00},
+					 {"currency": "USD", "income": 0, "expense": 7.00}]
+					""");
+		assertThat(this.api.get(TestUsers.register(this.mvc), "/api/v1/transactions/summary?period=2026-10"))
+			.bodyJson()
+			.isLenientlyEqualTo("[]");
+		assertThat(this.api.get(alice, "/api/v1/transactions/summary")).hasStatus(HttpStatus.BAD_REQUEST);
+	}
+
+	@Test
 	void listIsPagedNewestFirstAndFilterableByAccount() {
 		Session alice = TestUsers.register(this.mvc);
 		UUID card = this.api.account(alice, "Card", "100", "private");

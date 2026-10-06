@@ -74,7 +74,7 @@ ARCHITECTURE.md §5.4). Everything except `/auth/*` and `/actuator/health` needs
 | Family | `POST /families`, `GET /families/current`, `POST /families/current/invites`, `POST /families/join`, `POST /families/current/leave`, `PATCH`/`DELETE /families/current/members/{userId}` |
 | Accounts | `GET`/`POST /accounts`, `GET`/`PUT`/`DELETE /accounts/{id}` |
 | Categories | `GET`/`POST /categories`, `PUT`/`DELETE /categories/{id}` |
-| Transactions | `GET /transactions?page&size&accountId`, `POST /transactions`, `DELETE /transactions/{id}` |
+| Transactions | `GET /transactions?page&size&accountId`, `GET /transactions/summary?period=YYYY-MM` (per-currency month totals), `POST /transactions`, `DELETE /transactions/{id}` |
 | Budgets | `GET /budgets?period=YYYY-MM`, `POST /budgets`, `PUT`/`DELETE /budgets/{id}` |
 
 ## Layout

@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 
 import org.jspecify.annotations.Nullable;
@@ -63,6 +64,35 @@ public class TransactionService {
 			return PageView.of(Page.<TransactionEntity>empty(pageRequest), this::toViews);
 		}
 		return PageView.of(this.transactions.findTouching(accountIds, pageRequest), this::toViews);
+	}
+
+	/**
+	 * Income and expense per currency for the payments the user can see in a month. Never
+	 * summed across currencies: v1 has no FX (ARCHITECTURE.md §7).
+	 */
+	List<MonthSummaryView> monthSummary(UUID userId, YearMonth period) {
+		AccessScope scope = this.familyService.scopeFor(userId);
+		List<UUID> accountIds = this.accountService.visibleIds(scope);
+		if (accountIds.isEmpty()) {
+			return List.of();
+		}
+		List<Object[]> rows = this.transactions.sumPaymentsByAccountAndCategory(accountIds, period.atDay(1),
+				period.plusMonths(1).atDay(1));
+		Set<UUID> categoryIds = new HashSet<>();
+		rows.forEach((row) -> categoryIds.add((UUID) row[1]));
+		Map<UUID, AccountRef> accounts = this.accountService.refs(accountIds);
+		Map<UUID, CategoryView> categories = this.categoryService.views(categoryIds);
+		Map<String, BigDecimal[]> totals = new TreeMap<>();
+		for (Object[] row : rows) {
+			String currency = accounts.get((UUID) row[0]).currency();
+			BigDecimal[] sums = totals.computeIfAbsent(currency, (c) -> new BigDecimal[] { BigDecimal.ZERO, BigDecimal.ZERO });
+			int index = (categories.get((UUID) row[1]).type() == CategoryType.INCOME) ? 0 : 1;
+			sums[index] = sums[index].add((BigDecimal) row[2]);
+		}
+		return totals.entrySet()
+			.stream()
+			.map((entry) -> new MonthSummaryView(entry.getKey(), entry.getValue()[0], entry.getValue()[1]))
+			.toList();
 	}
 
 	@Transactional

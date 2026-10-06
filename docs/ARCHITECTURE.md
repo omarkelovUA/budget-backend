@@ -1,6 +1,6 @@
 # Family Budget — Architecture
 
-Status: draft v0.6 · 2026-10-06
+Status: draft v0.7 · 2026-10-06
 Companion doc: [PLAN.md](./PLAN.md) (roadmap, phases, open decisions)
 
 ## 1. Purpose
@@ -164,6 +164,12 @@ Other ownership rules:
   `FamilyDeleted` application event (Spring Modulith's event registry is already set up).
 - `SYSTEM`-owned default categories are deferred: the frontend's `Visibility` type has no
   value to show them with.
+
+**Month summary** (`GET /transactions/summary?period=YYYY-MM`, backs the dashboard):
+income and expense totals of the payments the caller can see in that month, one row per
+account currency — never summed across currencies (no FX, §7). Transfers are excluded:
+they move money between accounts and are neither income nor expense. Computed with one
+grouped query over the caller's visible accounts.
 
 **Budgets** are monthly, one per owner/category/month. `factAmount` is the sum of the
 category's payments in that month, computed on every read (indexed on
