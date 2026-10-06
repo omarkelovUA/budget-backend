@@ -1,6 +1,6 @@
   # Family Budget — Plan
 
-Status: draft v0.3 · 2026-10-06 (backend: M6 done, M7 done pending a manual Google login check, M8 done)
+Status: draft v0.4 · 2026-10-06 (M6, M8 done; M7 and M9 done pending manual Google login / browser checks)
 Companion doc: [ARCHITECTURE.md](./ARCHITECTURE.md) (system design this plan builds toward)
 
 ## 1. What we're building
@@ -120,8 +120,10 @@ it done.
   handler driven with a mocked OIDC user, PKCE redirect checked) and family
   create/invite/join/leave/remove/role change.
   - Remaining for exit: one real Google sign-in. Needs an OAuth client in Google Cloud
-    Console (redirect URI `http://localhost:8080/login/oauth2/code/google`) and
-    `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` set when starting the app.
+    Console and `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` set when starting the app.
+    Redirect URI: `http://localhost:4200/login/oauth2/code/google` when going through
+    the frontend's dev proxy (M9), `http://localhost:8080/...` when hitting the backend
+    directly.
   - Decisions taken: invite codes rather than email invites; opaque hashed refresh
     tokens; no `activeFamilyId` column (membership row is the source of truth);
     no MapStruct yet; `/api/v1` written into mappings. Details in ARCHITECTURE.md
@@ -153,6 +155,25 @@ it done.
   [ARCHITECTURE.md §6.2](./ARCHITECTURE.md#62-token-handling).
 - Exit criteria: mock repositories deleted or clearly marked dev-only; app runs fully
   against the real backend.
+- **Status: implemented (2026-10-06)**, frontend commit `d6d6715` on `budget-app-front`
+  `dev`.
+  - Order changed: auth went **first**, not last — every endpoint except login needs a
+    JWT, so no domain could be wired before it.
+  - Mock repositories deleted (user's choice over keeping a switchable mock mode).
+  - `Http*Repository` per domain behind the unchanged contracts; ids became UUID
+    strings; the family contract changed to invite codes (create code / join with
+    code) since the backend has no email invites.
+  - Verified: `ng build` clean, 11 unit tests green, and every API call the frontend
+    makes exercised through the dev proxy against the real backend (register, family,
+    invite/join, shared account, payment, budget fact, refresh on reload, logout).
+  - Remaining for exit: a manual click-through in a browser (not done — browser
+    automation wasn't available), plus the Google sign-in from M7.
+  - Known gaps, for M10: no paging UI (transaction list shows the newest 200); delete
+    errors on list pages only reach the console; no "leave family" UI; dashboard still
+    a placeholder. If a browser drops the `Secure` refresh cookie on
+    `http://localhost`, run the backend with `REFRESH_COOKIE_SECURE=false`.
+  - Local dev: `ng serve` needs Node 22+ and proxies `/api`, `/oauth2`,
+    `/login/oauth2` to `localhost:8080` (`src/proxy.conf.json`).
 
 ### M10 — Hardening pass
 - Error states, loading states, empty states, responsive layout, basic a11y pass.

@@ -1,6 +1,6 @@
 # Family Budget — Architecture
 
-Status: draft v0.4 · 2026-10-06
+Status: draft v0.5 · 2026-10-06
 Companion doc: [PLAN.md](./PLAN.md) (roadmap, phases, open decisions)
 
 ## 1. Purpose
@@ -185,7 +185,9 @@ back an explicit active-family choice.
 The API follows the frontend's `model/types.ts` (as of M8) rather than the database
 shape: `visibility: 'private' | 'shared'` instead of `ownerType`/`ownerId`, and
 lower-case enum values (`'income'`, `'payment'`, `'admin'`, …). Differences the M9
-integration has to absorb:
+integration absorbed — the frontend types now use string ids and an `IAccountRef` for
+transaction accounts, and the `Http*Repository` classes do the remaining mapping, so the
+repository contracts stayed as they were:
 
 - Ids are UUID strings, not `number`.
 - Transaction `date` is an ISO `YYYY-MM-DD` string; transactions also carry `kind`
@@ -269,14 +271,31 @@ flowchart LR
   a shared + a private account, an over-budget category) so UI states aren't discovered
   late.
 
-### 4.4 Auth on the frontend (mocked until backend exists)
+As of M9 the mocks are deleted: every contract has only its `Http*Repository`
+implementation, mapping DTOs (UUID ids, ISO date strings, ids instead of embedded
+objects on create) and turning backend `ProblemDetail` types into user-facing messages
+(`core/http/problem.ts`).
 
-- `core/auth` exposes a signal-based `AuthStateService` (current user, tokens, family
-  membership) behind the same mock-then-real swap as §4.3.
-- Route guards (`canActivate` functional guards) check auth state signal; family-scoped
-  routes also check `activeFamilyId`.
-- Real implementation later: store access token in memory (not localStorage) + refresh
-  token flow via httpOnly cookie, see §6.2.
+### 4.4 Auth on the frontend
+
+- `core/auth/AuthState` holds the current user and the access token in signals —
+  memory only, never localStorage (§6.2). The user's `familyId` is looked up via
+  `GET /families/current` right after a session starts.
+- `provideAppInitializer` calls `restoreSession()` before the first route guard runs:
+  a `POST /auth/refresh` with the httpOnly cookie, so a reload keeps the user logged in.
+- `authInterceptor` adds the bearer token to `/api` calls (not `/api/v1/auth/*`). On a
+  401 it refreshes once — concurrent 401s share one refresh, since each refresh rotates
+  the cookie — and retries; if refreshing fails it clears the session and goes to
+  `/login`.
+- Google login is a full-page navigation to `/oauth2/authorization/google`. The backend
+  redirects back to `/auth/callback`; by then the startup refresh has already restored
+  the session, so `oauthCallbackGuard` just routes to `/dashboard` (or to
+  `/login?error=oauth` on failure).
+- Route guards (`authGuard`, `guestGuard`) are functional `canActivate` guards on the
+  auth signal.
+- Local dev: `ng serve` proxies `/api`, `/oauth2` and `/login/oauth2` to the backend
+  (`src/proxy.conf.json`), so the browser sees one origin — no CORS, and the refresh
+  cookie (`Path=/api/v1/auth`, `SameSite=Strict`) behaves as in production.
 
 ## 5. Backend architecture (Spring Boot)
 
