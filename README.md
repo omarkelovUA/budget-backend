@@ -4,8 +4,8 @@ REST API for Family Budget: private and family-shared accounts, categories, tran
 and monthly budgets. Spring Boot 4.1 / Java 25 modular monolith on PostgreSQL 18.
 
 - Frontend: [`budget-front`](https://github.com/omarkelovUA/budget-front) (Angular 22)
-- Design and roadmap: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md),
-  [`docs/PLAN.md`](docs/PLAN.md)
+- Design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); roadmap: `PLAN.md` in the
+  workspace folder that holds both repos (not versioned)
 
 ## Quick start (Docker only)
 

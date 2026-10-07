@@ -1,7 +1,10 @@
 # Family Budget — Architecture
 
-Status: draft v0.7 · 2026-10-06
-Companion doc: [PLAN.md](./PLAN.md) (roadmap, phases, open decisions)
+Status: draft v0.8 · 2026-10-07
+Companion doc: [PLAN.md](../../PLAN.md) (workspace root) (roadmap, phases, open decisions)
+Frontend (Angular SPA): [frontend ARCHITECTURE.md][frontend-arch]
+
+[frontend-arch]: https://github.com/omarkelovUA/budget-front/blob/main/docs/ARCHITECTURE.md
 
 ## 1. Purpose
 
@@ -13,8 +16,11 @@ private. A user can:
   every member of their family,
 - belong to exactly one family at a time (v1 simplification, see §7).
 
-This document describes the target system shape. It is intentionally stack-accurate but
-implementation-light — concrete code arrives phase by phase per [PLAN.md](./PLAN.md).
+This document describes the system as a whole and the backend: domain model, REST API,
+security and backend structure. It is intentionally stack-accurate but
+implementation-light — concrete code arrives phase by phase per [PLAN.md](../../PLAN.md).
+The Angular SPA has its own [frontend ARCHITECTURE.md][frontend-arch]; §4 lists only what
+the backend expects from it.
 
 ## 2. High-level system
 
@@ -39,7 +45,7 @@ flowchart LR
     IDP -. "id_token / code" .-> SEC
 ```
 
-- **Frontend** is a single Angular SPA. No server-side rendering requirement for v1.
+- **Frontend** is a single Angular SPA (see [frontend ARCHITECTURE.md][frontend-arch]).
 - **Backend** is a single Spring Boot modular-monolith (not microservices — scope doesn't
   justify the operational cost yet; see §8 for the tradeoff).
 - **Auth** has two entry points that both resolve to the same backend-issued JWT session:
@@ -207,101 +213,21 @@ repository contracts stayed as they were:
 - The current user (`GET /users/me`) has no `familyId`; the family comes from
   `GET /families/current` (404 when there is none).
 
-## 4. Frontend architecture (Angular)
+## 4. Client contract
 
-### 4.1 Stack
+The Angular SPA (its stack, structure and auth handling) is described in the
+[frontend ARCHITECTURE.md][frontend-arch]. What the backend relies on from it:
 
-- Angular 22, standalone components only (no NgModules).
-- **Signals** for all local/component state; `signal()`, `computed()`, `effect()`,
-  `linkedSignal()` where appropriate.
-- **Signal Forms** (`@angular/forms/signals`) replacing the current `ReactiveFormsModule`
-  usage in `account-form.ts` once the project is on v22 — tracked as its own phase so the
-  migration doesn't get entangled with new features.
-- `rxResource` (already in use in `account-list.ts`) for request-backed state; plain
-  `resource()` where a request is driven by a signal instead of an `Observable`.
-- No NgRx / global store library. Domain state lives in per-domain **signal-based
-  services** (`providedIn: 'root'`), each exposing readonly signals + methods — the same
-  shape a lightweight SignalStore would have, without the extra dependency. Revisit only
-  if cross-feature state coordination actually gets painful.
-
-### 4.2 Folder structure (target)
-
-```
-src/app/
-  core/                     # app-wide singletons, no UI
-    auth/                   # auth state service, login/refresh flows, route guards
-    http/                   # interceptors (auth header, error mapping, retry)
-    config/                 # environment/config access
-  shared/                   # dumb, reusable, no domain knowledge
-    ui/                     # buttons, icon-picker, color-picker, modal, form controls
-    pipes/ directives/
-  model/                    # shared TypeScript interfaces/types (today: types.ts)
-  features/
-    accounts/
-      data/                 # AccountRepository interface + mock & http implementations
-      account-list/ account-form/ ...
-    categories/
-    transactions/
-    budgets/
-    family/                 # family creation, invites, member list, role management
-    dashboard/              # aggregated overview (balances, month summary)
-  app.routes.ts             # lazy-loaded per feature
-```
-
-Today's `services/account-service.ts` and `components/account-list|account-form/*` map
-onto `features/accounts/*` — a rename/move, not a rewrite, happens when that feature
-area is revisited (see PLAN M2/M6).
-
-### 4.3 Mock-first data layer (the "dumb hardcoded service" strategy)
-
-Goal: build and visually/behaviorally validate every screen before the backend exists,
-then swap in real HTTP without touching components.
-
-```mermaid
-flowchart LR
-    Component --> Repo["XRepository (abstract class / injection token)"]
-    Repo -. "provided today" .-> Mock["MockXRepository\n(in-memory array + rxjs delay)"]
-    Repo -. "provided from Phase F6 onward" .-> Http["HttpXRepository\n(HttpClient calls to Spring API)"]
-```
-
-- Each domain defines a repository **contract** (abstract class, so it's a valid DI
-  token) returning `Observable<T>` — matching today's `AccountService` method shapes
-  (`getAccounts/create/update/delete`) so the contract barely has to change.
-- Two implementations: `Mock*Repository` (current style: in-memory arrays + `delay()` to
-  simulate latency, including simulated validation errors) and, later, `Http*Repository`.
-- Components/pages inject the **abstract contract**, never a concrete implementation —
-  swapping is a one-line change in `app.config.ts` providers (or per-environment
-  provider), not a component rewrite. This is the one structural rule worth adopting now,
-  before more features are built on top of today's concrete `AccountService`.
-- Mock data should intentionally include edge cases (zero balances, multiple currencies,
-  a shared + a private account, an over-budget category) so UI states aren't discovered
-  late.
-
-As of M9 the mocks are deleted: every contract has only its `Http*Repository`
-implementation, mapping DTOs (UUID ids, ISO date strings, ids instead of embedded
-objects on create) and turning backend `ProblemDetail` types into user-facing messages
-(`core/http/problem.ts`).
-
-### 4.4 Auth on the frontend
-
-- `core/auth/AuthState` holds the current user and the access token in signals —
-  memory only, never localStorage (§6.2). The user's `familyId` is looked up via
-  `GET /families/current` right after a session starts.
-- `provideAppInitializer` calls `restoreSession()` before the first route guard runs:
-  a `POST /auth/refresh` with the httpOnly cookie, so a reload keeps the user logged in.
-- `authInterceptor` adds the bearer token to `/api` calls (not `/api/v1/auth/*`). On a
-  401 it refreshes once — concurrent 401s share one refresh, since each refresh rotates
-  the cookie — and retries; if refreshing fails it clears the session and goes to
-  `/login`.
-- Google login is a full-page navigation to `/oauth2/authorization/google`. The backend
-  redirects back to `/auth/callback`; by then the startup refresh has already restored
-  the session, so `oauthCallbackGuard` just routes to `/dashboard` (or to
-  `/login?error=oauth` on failure).
-- Route guards (`authGuard`, `guestGuard`) are functional `canActivate` guards on the
-  auth signal.
-- Local dev: `ng serve` proxies `/api`, `/oauth2` and `/login/oauth2` to the backend
-  (`src/proxy.conf.json`), so the browser sees one origin — no CORS, and the refresh
-  cookie (`Path=/api/v1/auth`, `SameSite=Strict`) behaves as in production.
+- It holds the access token in memory only and calls `POST /auth/refresh` (cookie-based)
+  on startup and after a 401, sharing one refresh between concurrent 401s since every
+  refresh rotates the cookie (§6.2).
+- Google login is a full-page navigation to `/oauth2/authorization/google`; the backend
+  redirects back to the SPA's `/auth/callback` (§6.1).
+- It switches on the `ProblemDetail` `type`, not the HTTP status (§5.4), so problem types
+  are part of the API contract.
+- In local dev `ng serve` proxies `/api`, `/oauth2` and `/login/oauth2` here, so the
+  browser sees one origin — no CORS, and the refresh cookie (`Path=/api/v1/auth`,
+  `SameSite=Strict`) behaves as in production (§6.4).
 
 ## 5. Backend architecture (Spring Boot)
 
@@ -384,7 +310,8 @@ A single `@RestControllerAdvice` in `common` translates domain exceptions into c
 `ProblemDetail` responses. Domain errors are `ApiException(status, type, message)` (with
 `NotFoundException` as a shorthand); the `type` slug becomes the problem `type` URI.
 Bean Validation failures are handled by Spring MVC's built-in `ProblemDetail` support.
-Frontend's HTTP error interceptor (§4.4) depends on this shape being stable from day one.
+The frontend maps problem types to user-facing messages (§4), so this shape has to stay
+stable.
 
 Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `invalid-refresh-token`, `email-not-verified`, `unauthenticated`, `already-in-family`,
@@ -505,10 +432,8 @@ only changes those two beans.
 
 | Decision | Choice | Why |
 |---|---|---|
-| Repos | Two repos (`budget-app-front` existing, new `budget-app-backend`) | Different stacks/lifecycles/CI; a monorepo buys nothing here since there's no shared build tooling between Angular and Spring Boot. Keep this doc + PLAN.md in the frontend repo for now (it exists today); mirror or move to the backend repo once that exists — whichever the user prefers at that point. |
+| Repos | Two repos (`budget-app-front`, `budget-app-backend`) | Different stacks/lifecycles/CI; a monorepo buys nothing here since there's no shared build tooling between Angular and Spring Boot. Each repo documents its own side; system-wide design lives in this doc. |
 | Backend topology | Modular monolith | Family Budget's scope (a handful of bounded contexts, one team) doesn't justify microservice operational cost. Package-by-feature keeps a future split possible. |
-| Frontend state | Per-domain signal services, no NgRx | Matches Angular's current direction (signals as the primitive); avoids a global-store dependency the app's complexity doesn't need yet. |
-| Mock-to-real swap | Abstract repository contract + DI token/provider swap | Lets UI work start immediately (per user's request) without a later rewrite; only the provider wiring changes. |
 | Sharing model | Polymorphic `ownerType/ownerId` on Account/Category/Budget | One mental model and one authorization check path instead of duplicated private/shared tables or scattered boolean flags. |
 | Auth | JWT access token (body) + refresh token (httpOnly cookie); OAuth2 as alternate login only | Standard, well-understood SPA pattern; OAuth2 complexity isolated to the login step instead of leaking into every authorization decision. |
 | Backend version | Spring Boot 4.1 / Java 25 | The whole 3.x line left OSS support on 2026-06-30 (3.5 was the last); starting a new project on it would mean starting unsupported. Java 25 is the current LTS. |
@@ -517,5 +442,5 @@ only changes those two beans.
 
 ## 9. Open questions
 
-Tracked with owners/status in [PLAN.md §Open decisions](./PLAN.md#open-decisions) —
+Tracked with owners/status in [PLAN.md §Open decisions](../../PLAN.md#open-decisions) —
 not repeated here to avoid the two docs drifting out of sync.
