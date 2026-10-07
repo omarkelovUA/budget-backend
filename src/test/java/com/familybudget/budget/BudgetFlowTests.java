@@ -36,8 +36,8 @@ class BudgetFlowTests {
 		Session bob = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
 		UUID groceries = this.api.category(alice, "expense", "Groceries", "shared");
-		UUID alicesCard = this.api.account(alice, "Alice card", "1000", "private");
-		UUID bobsCard = this.api.account(bob, "Bob card", "1000", "private");
+		UUID alicesCard = this.api.account(alice, "Alice card", "1000");
+		UUID bobsCard = this.api.account(bob, "Bob card", "1000");
 		this.api.pay(alice, alicesCard, groceries, "100", "2026-10-01");
 		this.api.pay(bob, bobsCard, groceries, "50", "2026-10-31");
 		this.api.pay(bob, bobsCard, groceries, "999", "2026-11-01");
@@ -60,7 +60,7 @@ class BudgetFlowTests {
 	@Test
 	void factAmountFollowsTransactionsAsTheyChange() {
 		Session alice = TestUsers.register(this.mvc);
-		UUID card = this.api.account(alice, "Card", "1000", "private");
+		UUID card = this.api.account(alice, "Card", "1000");
 		UUID food = this.api.category(alice, "expense", "Food", "private");
 		budget(alice, food, "2026-10", "300", "private");
 		UUID payment = TestApi.id(this.api.pay(alice, card, food, "120", "2026-10-15"));

@@ -1,6 +1,6 @@
 # Family Budget — Architecture
 
-Status: draft v0.9 · 2026-10-07
+Status: draft v0.10 · 2026-10-07
 Companion doc: [PLAN.md](../../PLAN.md) (workspace root) (roadmap, phases, open decisions)
 Frontend (Angular SPA): [frontend ARCHITECTURE.md][frontend-arch]
 
@@ -60,8 +60,9 @@ flowchart LR
 erDiagram
     USER ||--o{ FAMILY_MEMBERSHIP : has
     FAMILY ||--o{ FAMILY_MEMBERSHIP : has
-    USER ||--o{ ACCOUNT : "owns (private)"
-    FAMILY ||--o{ ACCOUNT : "owns (shared)"
+    USER ||--o{ ACCOUNT : owns
+    ACCOUNT ||--o{ ACCOUNT_ACCESS : grants
+    USER ||--o{ ACCOUNT_ACCESS : "is granted"
     USER ||--o{ CATEGORY : "owns (private, optional)"
     FAMILY ||--o{ CATEGORY : "owns (shared, optional)"
     ACCOUNT ||--o{ TRANSACTION : "source/destination"
@@ -91,13 +92,18 @@ erDiagram
     }
     ACCOUNT {
         uuid id
-        enum ownerType "USER | FAMILY"
-        uuid ownerId
+        uuid ownerUserId
+        timestamp closedAt "null while open"
         string name
         decimal balance
         string currency
         string icon
         string color
+    }
+    ACCOUNT_ACCESS {
+        uuid accountId
+        uuid userId "a member of the owner's family"
+        enum level "VISIBLE | SHARED"
     }
     CATEGORY {
         uuid id
@@ -133,40 +139,81 @@ erDiagram
 
 ### 3.2 Ownership / sharing rule
 
-Every shareable aggregate (`Account`, `Category`, `Budget`) carries `ownerType` +
-`ownerId` instead of a boolean "shared" flag:
+**Accounts** (since M12) have exactly one owner, a user. The owner decides per family
+member what they get, stored in `account_access`:
+
+| Member's level | Sees the account, balance, transactions | Records transactions on it |
+|---|---|---|
+| none (default, no row) | no | no |
+| `VISIBLE` | yes | no |
+| `SHARED` | yes | yes |
+
+An account without grants is private. One account can be visible to some members, shared
+with others and hidden from the rest. The API reports the caller's level as `access`
+(`owner | shared | visible`); only the owner gets the `grants` list.
+
+- Only the owner edits an account, changes its grants, closes or deletes it
+  (`403 not-account-owner`). Grants can change at any time.
+- Grants only go to other current members of the owner's family
+  (`409 grantee-not-in-family`, `409 no-family` without one). When a user stops being a
+  member (leaves, is removed, or moves family through an invitation), the family module
+  publishes `FamilyMembershipEnded`. The account module then deletes every grant the user
+  gives or holds, synchronously in the same database transaction. The accounts stay with
+  their owner.
+- Recording on an account needs ownership or `SHARED`. A transfer needs it on **both**
+  sides; a `VISIBLE` account takes no transactions in either direction
+  (`403 account-read-only`).
+- **Closing** (`POST /accounts/{id}/close {targetAccountId}`) is how an owner gets rid of
+  an account that has history. A non-zero balance moves to the target as a transfer;
+  a negative balance is pulled from it. The target needs the same currency
+  (`409 currency-mismatch`) and must be usable by the owner; it is required unless the
+  balance is zero (`409 close-target-required`). Then `closed_at` is set and all grants
+  are dropped. Closed accounts disappear from lists (the owner sees them with
+  `?closed=true`). They take no new transactions, and transactions touching them can't be
+  deleted (`409 account-closed`). `DELETE` only works for accounts without transactions
+  (`409 account-in-use`).
+- V10 migrated the old family-owned accounts: owner = the family's longest-standing
+  admin, everyone else `SHARED`.
+
+**Categories and budgets** keep the polymorphic owner: `ownerType` + `ownerId` instead
+of a boolean "shared" flag.
 
 - `ownerType = USER, ownerId = <userId>` → private, visible only to that user.
 - `ownerType = FAMILY, ownerId = <familyId>` → shared, visible to every member of that
   family.
 
-This single polymorphic-owner pattern avoids duplicating each table into
-`*_private` / `*_shared` variants and keeps authorization logic in one place
-(see §6.3). `Transaction` has no owner of its own — its visibility is derived from the
-account(s) it touches:
+This avoids duplicating each table into `*_private` / `*_shared` variants and keeps
+authorization logic in one place (see §6.3).
 
-- **Visible** to anyone who can see *at least one* of its accounts, and reported as
-  `shared` if any of them is shared. A family member therefore sees Alice's transfer from
-  her private card into the family account, with the card shown as a reference (name,
-  currency, icon, color — never its balance).
-- **Deletable** only by someone who can access *all* of its accounts; otherwise
-  `403 transaction-not-editable`. Transactions are immutable — correcting one means
-  deleting and re-creating it. Recording or deleting a transaction adjusts the touched
-  balances in the same database transaction (atomic `balance = balance + delta`).
+**Transactions** have no owner of their own; what a caller may do follows from their
+access to the account(s) a transaction touches:
+
+- **Visible** to anyone who can see *at least one* of its accounts. A family member
+  therefore sees Alice's transfer from her private card into an account shared with them,
+  with the card shown as a reference (name, currency, icon, color, `access: none` —
+  never its balance).
+- **Deletable** when the caller has ownership or `SHARED` on *all* of its (open)
+  accounts, **and** either recorded it or owns one of those accounts. Otherwise the
+  answer is `403 transaction-not-editable`. Responses carry `editable` so clients don't
+  repeat the rule.
+- Transactions are immutable: correcting one means deleting and re-creating it.
+  Recording or deleting a transaction adjusts the touched balances in the same database
+  transaction (atomic `balance = balance + delta`).
 - A payment's direction comes from its category type (income adds, expense subtracts);
   amounts are always positive. Transfers require both accounts to share a currency.
 
 Other ownership rules:
 
-- An aggregate's visibility (private/shared) is fixed at creation
+- A category's or budget's visibility (private/shared) is fixed at creation
   (`409 visibility-immutable`), since flipping it would silently change who sees its
   history. A category's income/expense type is fixed too, because it determines what past
   payments did to balances.
 - Creating something `shared` without a family fails with `409 no-family`.
-- Accounts and categories that are still referenced (transactions, budgets) can't be
-  deleted (`409 account-in-use` / `category-in-use`), enforced by foreign keys.
-- `owner_id` has no foreign key (it points at users *or* families). Deleting a family
-  (its last member leaving) currently leaves its shared data orphaned — to be fixed with a
+- Categories that are still referenced (transactions, budgets) can't be deleted
+  (`409 category-in-use`), enforced by foreign keys.
+- A category's or budget's `owner_id` has no foreign key (it points at users *or*
+  families). Deleting a family (its last member leaving) currently leaves its shared
+  categories and budgets orphaned — to be fixed with a
   `FamilyDeleted` application event (Spring Modulith's event registry is already set up).
 - `SYSTEM`-owned default categories are deferred: the frontend's `Visibility` type has no
   value to show them with.
@@ -175,7 +222,8 @@ Other ownership rules:
 income and expense totals of the payments the caller can see in that month, one row per
 account currency — never summed across currencies (no FX, §7). Transfers are excluded:
 they move money between accounts and are neither income nor expense. Computed with one
-grouped query over the caller's visible accounts.
+grouped query over every account the caller can see (owned, shared or visible, closed
+ones included so past months stay correct).
 
 **Budgets** are monthly, one per owner/category/month. `factAmount` is the sum of the
 category's payments in that month, computed on every read (indexed on
@@ -212,7 +260,8 @@ back an explicit active-family choice.
 ### 3.3 Relationship to current frontend types
 
 The API follows the frontend's `model/types.ts` (as of M8) rather than the database
-shape: `visibility: 'private' | 'shared'` instead of `ownerType`/`ownerId`, and
+shape: `visibility: 'private' | 'shared'` instead of `ownerType`/`ownerId` for categories
+and budgets (accounts send `owner`, `access`, `grants` and `closed` instead, §3.2), and
 lower-case enum values (`'income'`, `'payment'`, `'admin'`, …). Differences the M9
 integration absorbed — the frontend types now use string ids and an `IAccountRef` for
 transaction accounts, and the `Http*Repository` classes do the remaining mapping, so the
@@ -335,7 +384,8 @@ Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `invalid-invite`, `already-invited`, `already-member`, `family-full`, `admin-required`, `last-admin`, `cannot-remove-self`, `no-family`,
 `visibility-immutable`, `category-type-immutable`, `account-in-use`, `category-in-use`,
 `invalid-transaction`, `currency-mismatch`, `transaction-not-editable`,
-`category-not-shared`, `budget-exists`.
+`category-not-shared`, `budget-exists`, `not-account-owner`, `account-read-only`,
+`account-closed`, `grantee-not-in-family`, `close-target-required`.
 
 401/403 raised by the security filters themselves (missing/invalid access token) get the
 same shape (`unauthenticated` / `forbidden`) via custom entry point and access-denied
@@ -411,12 +461,16 @@ only changes those two beans.
 
 - Every request carries the authenticated `userId` (from JWT) resolved server-side to
   their current family via `FamilyService.currentFamilyId(userId)` (§3.2).
-- Repository queries for `Account`/`Category`/`Budget`/`Transaction` are always scoped to
-  `ownerType=USER AND ownerId=:userId OR ownerType=FAMILY AND ownerId=:activeFamilyId` —
-  centralized in the service layer (§5.2) so no controller can accidentally leak
-  cross-family data.
-- Mutating a `FAMILY`-owned resource additionally checks the caller is a member (any
-  role) of that family; family-management actions (invite, remove member, change role)
+- Account queries are scoped to "owned by the caller, or the caller has a grant"; grants
+  only ever exist inside one family and are revoked when membership ends (§3.2).
+  Transactions are scoped through the accounts the caller can see.
+- Category and budget queries are scoped to
+  `ownerType=USER AND ownerId=:userId OR ownerType=FAMILY AND ownerId=:activeFamilyId`.
+- Both are centralized in the service layer (§5.2) so no controller can accidentally
+  leak cross-family data.
+- Mutating an account requires being its owner; recording on it requires ownership or
+  `SHARED` (§3.2). Mutating a `FAMILY`-owned category or budget checks the caller is a
+  member (any role) of that family; family-management actions (invite, remove member, change role)
   require `ADMIN`.
 - A family always keeps at least one `ADMIN`: the last admin can't leave or be demoted
   while other members remain. The last member leaving deletes the family.
@@ -453,7 +507,8 @@ only changes those two beans.
 |---|---|---|
 | Repos | Two repos (`budget-app-front`, `budget-app-backend`) | Different stacks/lifecycles/CI; a monorepo buys nothing here since there's no shared build tooling between Angular and Spring Boot. Each repo documents its own side; system-wide design lives in this doc. |
 | Backend topology | Modular monolith | Family Budget's scope (a handful of bounded contexts, one team) doesn't justify microservice operational cost. Package-by-feature keeps a future split possible. |
-| Sharing model | Polymorphic `ownerType/ownerId` on Account/Category/Budget | One mental model and one authorization check path instead of duplicated private/shared tables or scattered boolean flags. |
+| Sharing model | Polymorphic `ownerType/ownerId` on Category/Budget | One mental model and one authorization check path instead of duplicated private/shared tables or scattered boolean flags. |
+| Account sharing (M12) | One owner per account + per-member `VISIBLE`/`SHARED` grants | Families wanted to show an account to some members, let others record on it and hide it from the rest. A single family-owned flag can't express that, and an account always has someone responsible for it. |
 | Auth | JWT access token (body) + refresh token (httpOnly cookie); OAuth2 as alternate login only | Standard, well-understood SPA pattern; OAuth2 complexity isolated to the login step instead of leaking into every authorization decision. |
 | Backend version | Spring Boot 4.1 / Java 25 | The whole 3.x line left OSS support on 2026-06-30 (3.5 was the last); starting a new project on it would mean starting unsupported. Java 25 is the current LTS. |
 | JWT handling | Spring Security resource server + `NimbusJwtEncoder`, not a custom filter | Less security code of our own to get wrong; key rotation/asymmetric keys become a bean swap. |

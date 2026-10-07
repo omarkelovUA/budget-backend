@@ -5,11 +5,13 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,20 +41,31 @@ public class FamilyService {
 
 	private final UserService userService;
 
+	private final ApplicationEventPublisher events;
+
 	private final Duration inviteTtl;
 
 	FamilyService(FamilyRepository families, FamilyMemberRepository members, FamilyInvitationRepository invitations,
-			UserService userService, @Value("${app.family.invite-ttl}") Duration inviteTtl) {
+			UserService userService, ApplicationEventPublisher events,
+			@Value("${app.family.invite-ttl}") Duration inviteTtl) {
 		this.families = families;
 		this.members = members;
 		this.invitations = invitations;
 		this.userService = userService;
+		this.events = events;
 		this.inviteTtl = inviteTtl;
 	}
 
 	/** The caller's family, used by later modules to scope shared data (ARCHITECTURE.md §6.3). */
 	public Optional<UUID> currentFamilyId(UUID userId) {
 		return this.members.findById(userId).map(FamilyMemberEntity::getFamilyId);
+	}
+
+	public Set<UUID> memberIds(UUID familyId) {
+		return this.members.findByFamilyIdOrderByJoinedAt(familyId)
+			.stream()
+			.map(FamilyMemberEntity::getUserId)
+			.collect(Collectors.toSet());
 	}
 
 	public AccessScope scopeFor(UUID userId) {
@@ -183,10 +196,12 @@ public class FamilyService {
 		if (all.size() == 1) {
 			this.members.delete(member);
 			this.families.deleteById(familyId);
-			return;
 		}
-		requireNotLastAdmin(member);
-		this.members.delete(member);
+		else {
+			requireNotLastAdmin(member);
+			this.members.delete(member);
+		}
+		membershipEnded(userId, familyId);
 	}
 
 	@Transactional
@@ -196,6 +211,7 @@ public class FamilyService {
 			throw new ApiException(HttpStatus.CONFLICT, "cannot-remove-self", "Use leave to remove yourself");
 		}
 		this.members.delete(memberOfSameFamily(admin, memberUserId));
+		membershipEnded(memberUserId, admin.getFamilyId());
 	}
 
 	@Transactional
@@ -225,6 +241,11 @@ public class FamilyService {
 			this.members.flush();
 			this.families.deleteById(oldFamilyId);
 		}
+		membershipEnded(member.getUserId(), oldFamilyId);
+	}
+
+	private void membershipEnded(UUID userId, UUID familyId) {
+		this.events.publishEvent(new FamilyMembershipEnded(userId, familyId));
 	}
 
 	private FamilyInvitationEntity receivedInvitation(UUID userId, UUID invitationId) {

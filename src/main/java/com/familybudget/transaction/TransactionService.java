@@ -1,10 +1,13 @@
 package com.familybudget.transaction;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.YearMonth;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -17,8 +20,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.familybudget.account.AccountAccess;
 import com.familybudget.account.AccountRef;
 import com.familybudget.account.AccountService;
+import com.familybudget.account.AccountView;
 import com.familybudget.category.CategoryService;
 import com.familybudget.category.CategoryType;
 import com.familybudget.category.CategoryView;
@@ -26,7 +31,6 @@ import com.familybudget.common.AccessScope;
 import com.familybudget.common.ApiException;
 import com.familybudget.common.NotFoundException;
 import com.familybudget.common.PageView;
-import com.familybudget.common.Visibility;
 import com.familybudget.family.FamilyService;
 
 /**
@@ -56,14 +60,14 @@ public class TransactionService {
 	}
 
 	PageView<TransactionView> list(UUID userId, @Nullable UUID accountId, int page, int size) {
-		AccessScope scope = this.familyService.scopeFor(userId);
-		List<UUID> accountIds = (accountId != null) ? List.of(this.accountService.requireAccessible(scope, accountId).id())
-				: this.accountService.visibleIds(scope);
+		List<UUID> accountIds = (accountId != null) ? List.of(this.accountService.requireViewable(userId, accountId).id())
+				: this.accountService.viewableIds(userId);
 		PageRequest pageRequest = PageRequest.of(page, size, NEWEST_FIRST);
 		if (accountIds.isEmpty()) {
-			return PageView.of(Page.<TransactionEntity>empty(pageRequest), this::toViews);
+			return PageView.of(Page.<TransactionEntity>empty(pageRequest), (entities) -> toViews(userId, entities));
 		}
-		return PageView.of(this.transactions.findTouching(accountIds, pageRequest), this::toViews);
+		return PageView.of(this.transactions.findTouching(accountIds, pageRequest),
+				(entities) -> toViews(userId, entities));
 	}
 
 	/**
@@ -71,8 +75,7 @@ public class TransactionService {
 	 * summed across currencies: v1 has no FX (ARCHITECTURE.md §7).
 	 */
 	List<MonthSummaryView> monthSummary(UUID userId, YearMonth period) {
-		AccessScope scope = this.familyService.scopeFor(userId);
-		List<UUID> accountIds = this.accountService.visibleIds(scope);
+		List<UUID> accountIds = this.accountService.viewableIds(userId);
 		if (accountIds.isEmpty()) {
 			return List.of();
 		}
@@ -80,7 +83,7 @@ public class TransactionService {
 				period.plusMonths(1).atDay(1));
 		Set<UUID> categoryIds = new HashSet<>();
 		rows.forEach((row) -> categoryIds.add((UUID) row[1]));
-		Map<UUID, AccountRef> accounts = this.accountService.refs(accountIds);
+		Map<UUID, AccountRef> accounts = this.accountService.refs(userId, accountIds);
 		Map<UUID, CategoryView> categories = this.categoryService.views(categoryIds);
 		Map<String, BigDecimal[]> totals = new TreeMap<>();
 		for (Object[] row : rows) {
@@ -102,23 +105,54 @@ public class TransactionService {
 			case PAYMENT -> recordPayment(scope, request);
 			case TRANSFER -> recordTransfer(scope, request);
 		};
-		return toViews(List.of(this.transactions.save(transaction))).getFirst();
+		return toViews(userId, List.of(this.transactions.save(transaction))).getFirst();
+	}
+
+	/**
+	 * Closes an account its owner no longer needs: the remaining balance moves to
+	 * {@code targetAccountId} (same currency, usable by the owner) as a transfer, then the
+	 * account is archived. A negative balance is pulled from the target, so it ends at zero.
+	 */
+	@Transactional
+	AccountView closeAccount(UUID userId, UUID accountId, @Nullable UUID targetAccountId) {
+		AccountView account = this.accountService.requireOwnedOpen(userId, accountId);
+		int sign = account.balance().signum();
+		if (sign != 0) {
+			if (targetAccountId == null || targetAccountId.equals(accountId)) {
+				throw new ApiException(HttpStatus.CONFLICT, "close-target-required",
+						"Pick another account to move the remaining balance to");
+			}
+			AccountRef target = this.accountService.requireUsable(userId, targetAccountId);
+			requireSameCurrency(account.currency(), target.currency());
+			UUID from = (sign > 0) ? accountId : target.id();
+			UUID to = (sign > 0) ? target.id() : accountId;
+			BigDecimal amount = account.balance().abs();
+			this.accountService.adjustBalance(from, amount.negate());
+			this.accountService.adjustBalance(to, amount);
+			this.transactions.save(TransactionEntity.transfer(amount, LocalDate.now(), userId, null, from, to));
+		}
+		this.accountService.markClosed(accountId);
+		return this.accountService.get(userId, accountId);
 	}
 
 	@Transactional
 	void delete(UUID userId, UUID id) {
-		AccessScope scope = this.familyService.scopeFor(userId);
 		TransactionEntity transaction = this.transactions.findById(id)
 			.orElseThrow(() -> new NotFoundException("Transaction not found"));
 		List<UUID> touched = transaction.accountIds();
-		Set<UUID> accessible = this.accountService.accessibleIds(scope, touched);
-		if (accessible.isEmpty()) {
+		Collection<AccountRef> accounts = this.accountService.refs(userId, touched).values();
+		if (accounts.stream().noneMatch((account) -> account.access().canView())) {
 			throw new NotFoundException("Transaction not found");
 		}
-		// e.g. a family member's transfer from their private account into a shared one.
-		if (!accessible.containsAll(touched)) {
+		// Deleting would change a closed account's frozen balance.
+		if (accounts.stream().anyMatch(AccountRef::closed)) {
+			throw new ApiException(HttpStatus.CONFLICT, "account-closed",
+					"This transaction touches a closed account");
+		}
+		if (!isEditable(transaction, accounts, userId)) {
 			throw new ApiException(HttpStatus.FORBIDDEN, "transaction-not-editable",
-					"This transaction touches an account you can't access");
+					"Only whoever recorded this transaction or the account's owner can delete it,"
+							+ " and only with shared access to every account it touches");
 		}
 		if (transaction.getKind() == TransactionKind.PAYMENT) {
 			CategoryView category = this.categoryService.views(List.of(TransactionEntity.require(transaction.getCategoryId())))
@@ -150,7 +184,7 @@ public class TransactionService {
 				|| request.toAccountId() != null) {
 			throw invalid("A payment needs accountId and categoryId, and no transfer accounts");
 		}
-		AccountRef account = this.accountService.requireAccessible(scope, request.accountId());
+		AccountRef account = this.accountService.requireUsable(scope.userId(), request.accountId());
 		CategoryView category = this.categoryService.requireAccessible(scope, request.categoryId());
 		this.accountService.adjustBalance(account.id(), signed(category.type(), request.amount()));
 		return TransactionEntity.payment(request.amount(), request.date(), scope.userId(), request.note(), account.id(),
@@ -165,20 +199,36 @@ public class TransactionService {
 		if (request.fromAccountId().equals(request.toAccountId())) {
 			throw invalid("A transfer needs two different accounts");
 		}
-		AccountRef from = this.accountService.requireAccessible(scope, request.fromAccountId());
-		AccountRef to = this.accountService.requireAccessible(scope, request.toAccountId());
-		// v1: one currency per account and no FX conversion (ARCHITECTURE.md §7).
-		if (!from.currency().equals(to.currency())) {
-			throw new ApiException(HttpStatus.CONFLICT, "currency-mismatch",
-					"Transfers between accounts in different currencies aren't supported");
-		}
+		// Both sides: "visible" means no transactions at all, in either direction.
+		AccountRef from = this.accountService.requireUsable(scope.userId(), request.fromAccountId());
+		AccountRef to = this.accountService.requireUsable(scope.userId(), request.toAccountId());
+		requireSameCurrency(from.currency(), to.currency());
 		this.accountService.adjustBalance(from.id(), request.amount().negate());
 		this.accountService.adjustBalance(to.id(), request.amount());
 		return TransactionEntity.transfer(request.amount(), request.date(), scope.userId(), request.note(), from.id(),
 				to.id());
 	}
 
-	private List<TransactionView> toViews(List<TransactionEntity> entities) {
+	/** v1: one currency per account and no FX conversion (ARCHITECTURE.md §7). */
+	private static void requireSameCurrency(String from, String to) {
+		if (!from.equals(to)) {
+			throw new ApiException(HttpStatus.CONFLICT, "currency-mismatch",
+					"Transfers between accounts in different currencies aren't supported");
+		}
+	}
+
+	/**
+	 * Shared access (or ownership) on every open account it touches, and the caller recorded
+	 * it or owns one of those accounts (PLAN.md open decision #7).
+	 */
+	private static boolean isEditable(TransactionEntity transaction, Collection<AccountRef> accounts, UUID userId) {
+		boolean usable = accounts.size() == transaction.accountIds().size()
+				&& accounts.stream().allMatch((account) -> account.access().canUse() && !account.closed());
+		return usable && (transaction.getRecordedBy().equals(userId)
+				|| accounts.stream().anyMatch((account) -> account.access() == AccountAccess.OWNER));
+	}
+
+	private List<TransactionView> toViews(UUID userId, List<TransactionEntity> entities) {
 		Set<UUID> accountIds = new HashSet<>();
 		Set<UUID> categoryIds = new HashSet<>();
 		for (TransactionEntity entity : entities) {
@@ -187,28 +237,24 @@ public class TransactionService {
 				categoryIds.add(entity.getCategoryId());
 			}
 		}
-		Map<UUID, AccountRef> accounts = this.accountService.refs(accountIds);
+		Map<UUID, AccountRef> accounts = this.accountService.refs(userId, accountIds);
 		Map<UUID, CategoryView> categories = this.categoryService.views(categoryIds);
-		return entities.stream().map((entity) -> toView(entity, accounts, categories)).toList();
+		return entities.stream().map((entity) -> toView(userId, entity, accounts, categories)).toList();
 	}
 
-	private static TransactionView toView(TransactionEntity entity, Map<UUID, AccountRef> accounts,
+	private static TransactionView toView(UUID userId, TransactionEntity entity, Map<UUID, AccountRef> accounts,
 			Map<UUID, CategoryView> categories) {
 		AccountRef account = lookup(accounts, entity.getAccountId());
 		AccountRef fromAccount = lookup(accounts, entity.getFromAccountId());
 		AccountRef toAccount = lookup(accounts, entity.getToAccountId());
-		boolean shared = isShared(account) || isShared(fromAccount) || isShared(toAccount);
+		List<AccountRef> touched = entity.accountIds().stream().map(accounts::get).filter(Objects::nonNull).toList();
 		return new TransactionView(entity.getId(), entity.getKind(), entity.getAmount(), entity.getOccurredOn(),
 				entity.getNote(), entity.getRecordedBy(), account, lookup(categories, entity.getCategoryId()),
-				fromAccount, toAccount, shared ? Visibility.SHARED : Visibility.PRIVATE);
+				fromAccount, toAccount, isEditable(entity, touched, userId));
 	}
 
 	private static <T> @Nullable T lookup(Map<UUID, T> values, @Nullable UUID id) {
 		return (id != null) ? values.get(id) : null;
-	}
-
-	private static boolean isShared(@Nullable AccountRef account) {
-		return account != null && account.visibility() == Visibility.SHARED;
 	}
 
 	private static BigDecimal signed(CategoryType type, BigDecimal amount) {

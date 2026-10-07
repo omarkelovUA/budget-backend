@@ -3,7 +3,11 @@ package com.familybudget;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.UUID;
+import java.util.stream.Collectors;
+
+import org.jspecify.annotations.Nullable;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -91,15 +95,44 @@ public final class TestApi {
 				session.userId());
 	}
 
-	public MvcTestResult createAccount(Session session, String name, String balance, String currency,
-			String visibility) {
-		return post(session, "/api/v1/accounts", """
-				{"name": "%s", "balance": %s, "currency": "%s", "icon": "card", "color": "green", "visibility": "%s"}
-				""".formatted(name, balance, currency, visibility));
+	public MvcTestResult createAccount(Session owner, String name, String balance, String currency,
+			Grant... grants) {
+		return post(owner, "/api/v1/accounts", accountJson(name, balance, currency, grants));
 	}
 
-	public UUID account(Session session, String name, String balance, String visibility) {
-		return id(createAccount(session, name, balance, "UAH", visibility));
+	public UUID account(Session owner, String name, String balance, Grant... grants) {
+		return id(createAccount(owner, name, balance, "UAH", grants));
+	}
+
+	public MvcTestResult updateAccount(Session session, UUID id, String name, String balance, Grant... grants) {
+		return put(session, "/api/v1/accounts/" + id, accountJson(name, balance, "UAH", grants));
+	}
+
+	public MvcTestResult closeAccount(Session session, UUID id, @Nullable UUID targetAccountId) {
+		return post(session, "/api/v1/accounts/" + id + "/close", (targetAccountId != null) ? """
+				{"targetAccountId": "%s"}
+				""".formatted(targetAccountId) : "{}");
+	}
+
+	private static String accountJson(String name, String balance, String currency, Grant... grants) {
+		String grantsJson = Arrays.stream(grants)
+			.map((grant) -> """
+					{"userId": "%s", "level": "%s"}""".formatted(grant.member().userId(), grant.level()))
+			.collect(Collectors.joining(", "));
+		return """
+				{"name": "%s", "balance": %s, "currency": "%s", "icon": "card", "color": "green", "grants": [%s]}
+				""".formatted(name, balance, currency, grantsJson);
+	}
+
+	public static Grant visible(Session member) {
+		return new Grant(member, "visible");
+	}
+
+	public static Grant shared(Session member) {
+		return new Grant(member, "shared");
+	}
+
+	public record Grant(Session member, String level) {
 	}
 
 	public MvcTestResult createCategory(Session session, String type, String name, String visibility) {

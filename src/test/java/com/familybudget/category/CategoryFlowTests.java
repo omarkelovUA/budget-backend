@@ -73,7 +73,7 @@ class CategoryFlowTests {
 	@Test
 	void categoryInUseCantBeDeleted() {
 		Session alice = TestUsers.register(this.mvc);
-		UUID card = this.api.account(alice, "Card", "100", "private");
+		UUID card = this.api.account(alice, "Card", "100");
 		UUID food = this.api.category(alice, "expense", "Food", "private");
 		UUID unused = this.api.category(alice, "expense", "Unused", "private");
 		this.api.pay(alice, card, food, "10", "2026-10-01");

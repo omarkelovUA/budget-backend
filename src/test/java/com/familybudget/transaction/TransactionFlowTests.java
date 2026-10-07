@@ -1,5 +1,7 @@
 package com.familybudget.transaction;
 
+import static com.familybudget.TestApi.shared;
+import static com.familybudget.TestApi.visible;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.UUID;
@@ -33,7 +35,7 @@ class TransactionFlowTests {
 	@Test
 	void paymentsMoveTheBalanceByCategoryType() {
 		Session alice = TestUsers.register(this.mvc);
-		UUID card = this.api.account(alice, "Card", "100", "private");
+		UUID card = this.api.account(alice, "Card", "100");
 		UUID food = this.api.category(alice, "expense", "Food", "private");
 		UUID salary = this.api.category(alice, "income", "Salary", "private");
 
@@ -54,9 +56,9 @@ class TransactionFlowTests {
 	@Test
 	void transfersMoveMoneyBetweenAccountsInTheSameCurrency() {
 		Session alice = TestUsers.register(this.mvc);
-		UUID card = this.api.account(alice, "Card", "100", "private");
-		UUID savings = this.api.account(alice, "Savings", "0", "private");
-		UUID dollars = TestApi.id(this.api.createAccount(alice, "USD", "0", "USD", "private"));
+		UUID card = this.api.account(alice, "Card", "100");
+		UUID savings = this.api.account(alice, "Savings", "0");
+		UUID dollars = TestApi.id(this.api.createAccount(alice, "USD", "0", "USD"));
 
 		MvcTestResult transfer = this.api.transfer(alice, card, savings, "40");
 		assertThat(transfer).hasStatus(HttpStatus.CREATED);
@@ -75,8 +77,8 @@ class TransactionFlowTests {
 	@Test
 	void deletingATransactionReversesItsEffect() {
 		Session alice = TestUsers.register(this.mvc);
-		UUID card = this.api.account(alice, "Card", "100", "private");
-		UUID savings = this.api.account(alice, "Savings", "0", "private");
+		UUID card = this.api.account(alice, "Card", "100");
+		UUID savings = this.api.account(alice, "Savings", "0");
 		UUID food = this.api.category(alice, "expense", "Food", "private");
 		UUID payment = TestApi.id(this.api.pay(alice, card, food, "30", "2026-10-02"));
 		UUID transfer = TestApi.id(this.api.transfer(alice, card, savings, "20"));
@@ -89,12 +91,12 @@ class TransactionFlowTests {
 	}
 
 	@Test
-	void familySeesTransactionsOnSharedAccountsOnly() {
+	void membersSeeTransactionsOnAccountsSharedWithThem() {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
-		UUID card = this.api.account(alice, "Alice card", "100", "private");
-		UUID cash = this.api.account(alice, "Family cash", "100", "shared");
+		UUID card = this.api.account(alice, "Alice card", "100");
+		UUID cash = this.api.account(alice, "Family cash", "100", visible(bob));
 		UUID food = this.api.category(alice, "expense", "Food", "shared");
 		this.api.pay(alice, card, food, "1", "2026-10-01");
 		this.api.pay(alice, cash, food, "2", "2026-10-02");
@@ -105,7 +107,8 @@ class TransactionFlowTests {
 			.containsExactly(2.0, 1.0);
 		MvcTestResult bobsView = this.api.get(bob, "/api/v1/transactions");
 		assertThat(bobsView).bodyJson().extractingPath("$.content[*].amount").asArray().containsExactly(2.0);
-		assertThat(bobsView).bodyJson().extractingPath("$.content[0].visibility").isEqualTo("shared");
+		assertThat(bobsView).bodyJson().extractingPath("$.content[0].account.access").isEqualTo("visible");
+		assertThat(bobsView).bodyJson().extractingPath("$.content[0].editable").isEqualTo(false);
 		assertThat(bobsView).bodyJson().extractingPath("$.totalElements").isEqualTo(1);
 	}
 
@@ -114,13 +117,14 @@ class TransactionFlowTests {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
-		UUID card = this.api.account(alice, "Alice card", "100", "private");
-		UUID cash = this.api.account(alice, "Family cash", "0", "shared");
+		UUID card = this.api.account(alice, "Alice card", "100");
+		UUID cash = this.api.account(alice, "Family cash", "0", shared(bob));
 		UUID transfer = TestApi.id(this.api.transfer(alice, card, cash, "25"));
 
 		MvcTestResult bobsView = this.api.get(bob, "/api/v1/transactions");
 		assertThat(bobsView).bodyJson().extractingPath("$.content[0].fromAccount.name").isEqualTo("Alice card");
-		assertThat(bobsView).bodyJson().extractingPath("$.content[0].visibility").isEqualTo("shared");
+		assertThat(bobsView).bodyJson().extractingPath("$.content[0].fromAccount.access").isEqualTo("none");
+		assertThat(bobsView).bodyJson().extractingPath("$.content[0].editable").isEqualTo(false);
 
 		assertThat(this.api.delete(bob, "/api/v1/transactions/" + transfer)).hasStatus(HttpStatus.FORBIDDEN)
 			.bodyJson()
@@ -130,13 +134,45 @@ class TransactionFlowTests {
 	}
 
 	@Test
+	void onlyTheRecorderOrTheOwnerDeletesATransaction() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		Session carol = TestUsers.register(this.mvc);
+		this.api.family(alice, bob, carol);
+		UUID joint = this.api.account(alice, "Joint", "100", shared(bob), shared(carol));
+		UUID food = this.api.category(alice, "expense", "Food", "shared");
+		UUID first = TestApi.id(this.api.pay(bob, joint, food, "1", "2026-10-01"));
+		UUID second = TestApi.id(this.api.pay(bob, joint, food, "2", "2026-10-02"));
+
+		assertThat(this.api.get(bob, "/api/v1/transactions")).bodyJson()
+			.extractingPath("$.content[*].editable")
+			.asArray()
+			.containsExactly(true, true);
+		assertThat(this.api.get(carol, "/api/v1/transactions")).bodyJson()
+			.extractingPath("$.content[*].editable")
+			.asArray()
+			.containsExactly(false, false);
+		// Carol has shared access too, but neither recorded it nor owns the account.
+		assertThat(this.api.delete(carol, "/api/v1/transactions/" + first)).hasStatus(HttpStatus.FORBIDDEN)
+			.bodyJson()
+			.extractingPath("$.type")
+			.isEqualTo(TestApi.PROBLEMS + "transaction-not-editable");
+		// The owner can delete what others recorded on her account.
+		assertThat(this.api.delete(alice, "/api/v1/transactions/" + first)).hasStatus(HttpStatus.NO_CONTENT);
+
+		// Once Bob is only allowed to look, he can't delete his own record either.
+		this.api.updateAccount(alice, joint, "Joint", "97", visible(bob), shared(carol));
+		assertThat(this.api.delete(bob, "/api/v1/transactions/" + second)).hasStatus(HttpStatus.FORBIDDEN);
+	}
+
+	@Test
 	void cantUseSomeoneElsesPrivateAccountOrCategory() {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
-		UUID alicesCard = this.api.account(alice, "Alice card", "100", "private");
+		UUID alicesCard = this.api.account(alice, "Alice card", "100");
 		UUID alicesHobby = this.api.category(alice, "expense", "Hobby", "private");
-		UUID bobsCard = this.api.account(bob, "Bob card", "100", "private");
+		UUID bobsCard = this.api.account(bob, "Bob card", "100");
 		UUID bobsFood = this.api.category(bob, "expense", "Food", "private");
 
 		assertThat(this.api.pay(bob, alicesCard, bobsFood, "1", "2026-10-01")).hasStatus(HttpStatus.NOT_FOUND);
@@ -149,7 +185,7 @@ class TransactionFlowTests {
 	@Test
 	void rejectsMalformedTransactions() {
 		Session alice = TestUsers.register(this.mvc);
-		UUID card = this.api.account(alice, "Card", "100", "private");
+		UUID card = this.api.account(alice, "Card", "100");
 		UUID food = this.api.category(alice, "expense", "Food", "private");
 
 		assertThat(this.api.pay(alice, card, food, "0", "2026-10-01")).hasStatus(HttpStatus.BAD_REQUEST);
@@ -167,9 +203,9 @@ class TransactionFlowTests {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
-		UUID alicesCard = this.api.account(alice, "Alice card", "1000", "private");
-		UUID cash = this.api.account(alice, "Family cash", "1000", "shared");
-		UUID dollars = TestApi.id(this.api.createAccount(alice, "USD", "1000", "USD", "shared"));
+		UUID alicesCard = this.api.account(alice, "Alice card", "1000");
+		UUID cash = this.api.account(alice, "Family cash", "1000", shared(bob));
+		UUID dollars = TestApi.id(this.api.createAccount(alice, "USD", "1000", "USD", visible(bob)));
 		UUID food = this.api.category(alice, "expense", "Food", "shared");
 		UUID salary = this.api.category(alice, "income", "Salary", "shared");
 		this.api.pay(alice, alicesCard, food, "10", "2026-10-01");
@@ -199,8 +235,8 @@ class TransactionFlowTests {
 	@Test
 	void listIsPagedNewestFirstAndFilterableByAccount() {
 		Session alice = TestUsers.register(this.mvc);
-		UUID card = this.api.account(alice, "Card", "100", "private");
-		UUID other = this.api.account(alice, "Other", "100", "private");
+		UUID card = this.api.account(alice, "Card", "100");
+		UUID other = this.api.account(alice, "Other", "100");
 		UUID food = this.api.category(alice, "expense", "Food", "private");
 		this.api.pay(alice, card, food, "1", "2026-10-01");
 		this.api.pay(alice, card, food, "3", "2026-10-03");
