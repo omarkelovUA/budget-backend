@@ -2,12 +2,15 @@ package com.familybudget.category;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+
+import com.familybudget.common.OwnerType;
 
 interface CategoryRepository extends JpaRepository<CategoryEntity, UUID> {
 
@@ -18,6 +21,9 @@ interface CategoryRepository extends JpaRepository<CategoryEntity, UUID> {
 	List<CategoryEntity> findVisible(UUID userId, @Nullable UUID familyId);
 
 	List<CategoryEntity> findByIdIn(Collection<UUID> ids);
+
+	Optional<CategoryEntity> findFirstByOwnerTypeAndOwnerIdAndTypeAndName(OwnerType ownerType, UUID ownerId,
+			CategoryType type, String name);
 
 	/** A deleted family's categories become its last member's private ones. */
 	@Modifying(flushAutomatically = true)

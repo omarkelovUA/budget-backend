@@ -1,6 +1,6 @@
 # Family Budget — Architecture
 
-Status: draft v0.12 · 2026-10-07
+Status: draft v0.13 · 2026-10-07
 Companion doc: [PLAN.md](../../PLAN.md) (workspace root) (roadmap, phases, open decisions)
 Frontend (Angular SPA): [frontend ARCHITECTURE.md][frontend-arch]
 
@@ -79,6 +79,7 @@ erDiagram
         string passwordHash "null if OAuth-only"
         string googleSubject "null until Google login"
         int sessionVersion "bumped to end all sessions"
+        string defaultCurrency "ISO 4217, from region at sign-up"
     }
     FAMILY {
         uuid id
@@ -94,6 +95,7 @@ erDiagram
     ACCOUNT {
         uuid id
         uuid ownerUserId
+        uuid transientRecipientId "set on transient accounts only"
         timestamp closedAt "null while open"
         string name
         decimal balance
@@ -223,6 +225,37 @@ Other ownership rules:
   without any transactions were deleted.
 - `SYSTEM`-owned default categories are deferred: the frontend's `Visibility` type has no
   value to show them with.
+
+**User settings** (`GET`/`PUT /users/me/settings`, M13): for now only
+`defaultCurrency`. It's set at sign-up from the client's `Accept-Language` (password and
+Google sign-up alike): the first locale whose country has a currency wins; a language
+without a country stands for its main country (`uk` → UA, `pl` → PL, …; widely shared
+languages like `en` are skipped); otherwise UAH. Unknown codes fail with
+`400 invalid-currency`.
+
+**Family transfers** (M14) let members send each other money even when the receiver's
+accounts are hidden from the sender. Each ordered pair (sender → recipient) and currency
+has a **transient account**: a row in `accounts` owned by the sender, with
+`transient_recipient_id` set, and at most one open per pair and currency.
+
+- **Creation:** when someone joins a family (`FamilyMembershipStarted`), transient
+  accounts are created with every other member in both directions, each in the
+  **sender's** default currency. Other currencies are created on the first send.
+- **Moving money** (`/family-transfers`):
+  - *send:* the sender's own account → transient;
+  - *collect:* transient → the recipient's own account;
+  - *take back:* transient → the sender's own account.
+  
+  Each step is a plain transfer, so in-transit money keeps counting for the sender. The
+  accounts at either end must be owned by the caller and use the transient account's
+  currency. Withdrawals are conditional updates, so a transient account never goes
+  negative (`409 insufficient-in-transit`).
+- **Off-limits otherwise:** transient accounts never appear in account lists. They can't
+  be used in generic transactions, edited, closed or used as a close target
+  (`409 transient-account`). Transactions touching them can't be deleted.
+- **Leaving:** when either side leaves the family (`FamilyMembershipEnded`), money still
+  in transit is written off as the sender's expense, as a payment in their auto-created
+  private category "Перекази в сім'ї", and the transient account is closed.
 
 **Month summary** (`GET /transactions/summary?period=YYYY-MM`, backs the dashboard):
 income and expense totals of the payments the caller can see in that month, one row per
@@ -391,7 +424,8 @@ Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `visibility-immutable`, `category-type-immutable`, `account-in-use`, `category-in-use`,
 `invalid-transaction`, `currency-mismatch`, `transaction-not-editable`,
 `category-not-shared`, `budget-exists`, `not-account-owner`, `account-read-only`,
-`account-closed`, `grantee-not-in-family`, `close-target-required`.
+`account-closed`, `grantee-not-in-family`, `close-target-required`, `invalid-currency`,
+`transient-account`, `recipient-not-in-family`, `insufficient-in-transit`.
 
 401/403 raised by the security filters themselves (missing/invalid access token) get the
 same shape (`unauthenticated` / `forbidden`) via custom entry point and access-denied

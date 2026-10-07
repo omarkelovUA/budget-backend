@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.familybudget.common.AccessScope;
 import com.familybudget.common.ApiException;
 import com.familybudget.common.NotFoundException;
+import com.familybudget.common.OwnerType;
 import com.familybudget.common.Visibility;
 import com.familybudget.family.FamilyService;
 
@@ -80,6 +81,23 @@ public class CategoryService {
 	/** A category the scope may use, for recording a payment or setting a budget. */
 	public CategoryView requireAccessible(AccessScope scope, UUID id) {
 		return accessible(scope, id).toView();
+	}
+
+	/**
+	 * The user's private expense category with this name, created if missing. Used for
+	 * bookings the system makes on the user's behalf (e.g. family-transfer write-offs).
+	 */
+	@Transactional
+	public CategoryView systemExpenseCategory(UUID userId, String name) {
+		return this.categories
+			.findFirstByOwnerTypeAndOwnerIdAndTypeAndName(OwnerType.USER, userId, CategoryType.EXPENSE, name)
+			.orElseGet(() -> {
+				CategoryEntity category = new CategoryEntity(OwnerType.USER, userId, CategoryType.EXPENSE);
+				category.apply(new CategoryRequest(CategoryType.EXPENSE, name, "assets/family.svg", "gray",
+						Visibility.PRIVATE));
+				return this.categories.save(category);
+			})
+			.toView();
 	}
 
 	/** Views regardless of visibility: callers only use them for data the scope already sees. */

@@ -70,7 +70,8 @@ ARCHITECTURE.md §5.4). Everything except `/auth/*` and `/actuator/health` needs
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`; Google via `/oauth2/authorization/google` |
-| User | `GET /users/me` |
+| User | `GET /users/me`, `GET`/`PUT /users/me/settings` |
+| Family transfers | `GET`/`POST /family-transfers`, `POST /family-transfers/{id}/collect`, `POST /family-transfers/{id}/take-back` |
 | Family | `POST /families`, `GET /families/current`, `POST`/`GET /families/current/invitations`, `DELETE /families/current/invitations/{id}`, `GET /invitations`, `POST /invitations/{id}/accept`, `POST /invitations/{id}/decline`, `POST /families/current/leave`, `PATCH`/`DELETE /families/current/members/{userId}` |
 | Accounts | `GET`/`POST /accounts` (`?closed=true` for your closed ones), `GET`/`PUT`/`DELETE /accounts/{id}`, `POST /accounts/{id}/close` |
 | Categories | `GET`/`POST /categories`, `PUT`/`DELETE /categories/{id}` |

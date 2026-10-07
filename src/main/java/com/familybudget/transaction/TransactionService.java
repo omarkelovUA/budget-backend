@@ -144,6 +144,11 @@ public class TransactionService {
 		if (accounts.stream().noneMatch((account) -> account.access().canView())) {
 			throw new NotFoundException("Transaction not found");
 		}
+		// Corrections to money in transit go through take back, never by deleting history.
+		if (accounts.stream().anyMatch(AccountRef::inTransit)) {
+			throw new ApiException(HttpStatus.CONFLICT, "transient-account",
+					"Family transfers can't be deleted; take the money back instead");
+		}
 		// Deleting would change a closed account's frozen balance.
 		if (accounts.stream().anyMatch(AccountRef::closed)) {
 			throw new ApiException(HttpStatus.CONFLICT, "account-closed",
@@ -222,8 +227,8 @@ public class TransactionService {
 	 * it or owns one of those accounts (PLAN.md open decision #7).
 	 */
 	private static boolean isEditable(TransactionEntity transaction, Collection<AccountRef> accounts, UUID userId) {
-		boolean usable = accounts.size() == transaction.accountIds().size()
-				&& accounts.stream().allMatch((account) -> account.access().canUse() && !account.closed());
+		boolean usable = accounts.size() == transaction.accountIds().size() && accounts.stream()
+			.allMatch((account) -> account.access().canUse() && !account.closed() && !account.inTransit());
 		return usable && (transaction.getRecordedBy().equals(userId)
 				|| accounts.stream().anyMatch((account) -> account.access() == AccountAccess.OWNER));
 	}

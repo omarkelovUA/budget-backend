@@ -179,6 +179,8 @@ public class FamilyService {
 			this.members.save(new FamilyMemberEntity(userId, familyId, FamilyRole.MEMBER));
 		}
 		invitation.close(InvitationStatus.ACCEPTED, now);
+		this.members.flush();
+		this.events.publishEvent(new FamilyMembershipStarted(userId, familyId));
 		return view(familyId);
 	}
 

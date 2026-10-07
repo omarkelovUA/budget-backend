@@ -11,6 +11,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import jakarta.persistence.EntityManager;
 import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -37,10 +38,14 @@ public class AccountService {
 
 	private final UserService userService;
 
-	AccountService(AccountRepository accounts, FamilyService familyService, UserService userService) {
+	private final EntityManager entityManager;
+
+	AccountService(AccountRepository accounts, FamilyService familyService, UserService userService,
+			EntityManager entityManager) {
 		this.accounts = accounts;
 		this.familyService = familyService;
 		this.userService = userService;
+		this.entityManager = entityManager;
 	}
 
 	/** Open accounts the user can see, or with {@code closed} their own closed ones. */
@@ -86,6 +91,7 @@ public class AccountService {
 	public AccountRef requireUsable(UUID userId, UUID id) {
 		AccountEntity account = viewable(userId, id);
 		requireOpen(account);
+		requireRegular(account);
 		if (!account.accessFor(userId).canUse()) {
 			throw new ApiException(HttpStatus.FORBIDDEN, "account-read-only",
 					"This account is only visible to you; you can't record transactions on it");
@@ -108,6 +114,11 @@ public class AccountService {
 	@Transactional
 	public void markClosed(UUID id) {
 		this.accounts.close(id);
+		// Bulk updates bypass loaded entities; reload this one so later reads see it closed.
+		AccountEntity loaded = this.entityManager.find(AccountEntity.class, id);
+		if (loaded != null) {
+			this.entityManager.refresh(loaded);
+		}
 	}
 
 	/** Every account the user can see, closed ones included (for history and totals). */
@@ -140,7 +151,58 @@ public class AccountService {
 		if (account.accessFor(userId) != AccountAccess.OWNER) {
 			throw new ApiException(HttpStatus.FORBIDDEN, "not-account-owner", "Only the account's owner can do this");
 		}
+		requireRegular(account);
 		return account;
+	}
+
+	/** Transient accounts only move through family transfers (send, collect, take back). */
+	private static void requireRegular(AccountEntity account) {
+		if (account.isTransient()) {
+			throw new ApiException(HttpStatus.CONFLICT, "transient-account",
+					"Money in transit between family members only moves through family transfers");
+		}
+	}
+
+	/** An open regular account the user owns: where family transfers start and end. */
+	public AccountRef requireOwnOpen(UUID userId, UUID id) {
+		AccountEntity account = owned(userId, id);
+		requireOpen(account);
+		return account.toRef(userId);
+	}
+
+	/** The open transient account from sender to recipient in this currency, created if missing. */
+	@Transactional
+	public TransientAccountView openTransient(UUID senderId, UUID recipientId, String currency) {
+		String name = this.userService.get(senderId).displayName() + " → "
+				+ this.userService.get(recipientId).displayName();
+		this.accounts.insertTransientIfAbsent(senderId, recipientId, currency, name);
+		return this.accounts.findOpenTransient(senderId, recipientId, currency)
+			.orElseThrow(() -> new IllegalStateException("Transient account was not created"))
+			.toTransientView();
+	}
+
+	public TransientAccountView requireOpenTransient(UUID id) {
+		return this.accounts.findById(id)
+			.filter((account) -> account.isTransient() && !account.isClosed())
+			.orElseThrow(() -> new NotFoundException("Transfer not found"))
+			.toTransientView();
+	}
+
+	/** Open transient accounts the user sends through or receives from. */
+	public List<TransientAccountView> openTransientsInvolving(UUID userId) {
+		return this.accounts.findOpenTransientsInvolving(userId)
+			.stream()
+			.map(AccountEntity::toTransientView)
+			.toList();
+	}
+
+	/** Takes {@code amount} out of a transient account, never below zero. */
+	@Transactional
+	public void withdrawFromTransient(UUID id, BigDecimal amount) {
+		if (this.accounts.withdraw(id, amount) != 1) {
+			throw new ApiException(HttpStatus.CONFLICT, "insufficient-in-transit",
+					"There isn't that much money waiting in this transfer");
+		}
 	}
 
 	private static void requireOpen(AccountEntity account) {

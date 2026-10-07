@@ -38,6 +38,10 @@ class AccountEntity {
 	@Column(nullable = false, updatable = false)
 	private UUID ownerUserId;
 
+	/** Set on transient accounts only: who the owner (the sender) is sending money to. */
+	@Column(updatable = false)
+	private @Nullable UUID transientRecipientId;
+
 	/** Family members the owner gave access to, by user id. */
 	@ElementCollection
 	@CollectionTable(name = "account_access", joinColumns = @JoinColumn(name = "account_id"))
@@ -101,6 +105,22 @@ class AccountEntity {
 		return this.closedAt != null;
 	}
 
+	@Nullable UUID getTransientRecipientId() {
+		return this.transientRecipientId;
+	}
+
+	boolean isTransient() {
+		return this.transientRecipientId != null;
+	}
+
+	TransientAccountView toTransientView() {
+		if (this.transientRecipientId == null) {
+			throw new IllegalStateException("Not a transient account");
+		}
+		return new TransientAccountView(getId(), this.ownerUserId, this.transientRecipientId, this.currency,
+				this.balance);
+	}
+
 	AccountAccess accessFor(UUID userId) {
 		if (this.ownerUserId.equals(userId)) {
 			return AccountAccess.OWNER;
@@ -124,7 +144,7 @@ class AccountEntity {
 
 	AccountRef toRef(UUID viewerId) {
 		return new AccountRef(getId(), this.name, this.currency, this.icon, this.color, accessFor(viewerId),
-				isClosed());
+				isClosed(), isTransient());
 	}
 
 	String getName() {
