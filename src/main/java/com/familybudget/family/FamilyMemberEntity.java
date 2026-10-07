@@ -18,14 +18,14 @@ class FamilyMemberEntity {
 	@Id
 	private UUID userId;
 
-	@Column(nullable = false, updatable = false)
+	@Column(nullable = false)
 	private UUID familyId;
 
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false)
 	private FamilyRole role;
 
-	@Column(nullable = false, updatable = false)
+	@Column(nullable = false)
 	private Instant joinedAt;
 
 	protected FamilyMemberEntity() {
@@ -52,6 +52,13 @@ class FamilyMemberEntity {
 
 	void setRole(FamilyRole role) {
 		this.role = role;
+	}
+
+	/** Accepting an invitation moves the membership row: one family per user. */
+	void moveTo(UUID familyId) {
+		this.familyId = familyId;
+		this.role = FamilyRole.MEMBER;
+		this.joinedAt = Instant.now();
 	}
 
 	Instant getJoinedAt() {

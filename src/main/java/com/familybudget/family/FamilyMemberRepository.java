@@ -9,6 +9,8 @@ interface FamilyMemberRepository extends JpaRepository<FamilyMemberEntity, UUID>
 
 	List<FamilyMemberEntity> findByFamilyIdOrderByJoinedAt(UUID familyId);
 
+	long countByFamilyId(UUID familyId);
+
 	long countByFamilyIdAndRole(UUID familyId, FamilyRole role);
 
 }

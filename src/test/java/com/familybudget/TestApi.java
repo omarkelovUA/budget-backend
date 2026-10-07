@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
@@ -20,8 +21,11 @@ public final class TestApi {
 
 	private final MockMvcTester mvc;
 
-	public TestApi(MockMvcTester mvc) {
+	private final JdbcTemplate jdbc;
+
+	public TestApi(MockMvcTester mvc, JdbcTemplate jdbc) {
 		this.mvc = mvc;
+		this.jdbc = jdbc;
 	}
 
 	public MvcTestResult get(Session session, String uri, Object... vars) {
@@ -46,8 +50,8 @@ public final class TestApi {
 			.exchange();
 	}
 
-	public MvcTestResult delete(Session session, String uri) {
-		return this.mvc.delete().uri(uri).header(HttpHeaders.AUTHORIZATION, session.bearer()).exchange();
+	public MvcTestResult delete(Session session, String uri, Object... vars) {
+		return this.mvc.delete().uri(uri, vars).header(HttpHeaders.AUTHORIZATION, session.bearer()).exchange();
 	}
 
 	/** Creates a family owned by {@code admin} and joins every other session to it. */
@@ -56,11 +60,35 @@ public final class TestApi {
 				{"name": "Family"}
 				""")).hasStatus(HttpStatus.CREATED);
 		for (Session member : members) {
-			MvcTestResult invite = post(admin, "/api/v1/families/current/invites", "");
-			assertThat(post(member, "/api/v1/families/join", """
-					{"code": "%s"}
-					""".formatted(TestUsers.json(invite, "$.code")))).hasStatusOk();
+			assertThat(join(admin, member)).hasStatusOk();
 		}
+	}
+
+	/** Invites {@code member} into {@code admin}'s family and accepts as {@code member}. */
+	public MvcTestResult join(Session admin, Session member) {
+		verifyEmail(member);
+		UUID invitationId = id(invite(admin, member.email()));
+		return postEmpty(member, "/api/v1/invitations/{id}/accept", invitationId);
+	}
+
+	public MvcTestResult invite(Session admin, String email) {
+		return post(admin, "/api/v1/families/current/invitations", """
+				{"email": "%s"}
+				""".formatted(email));
+	}
+
+	/** A POST without a body, e.g. accepting an invitation. */
+	public MvcTestResult postEmpty(Session session, String uri, Object... vars) {
+		return this.mvc.post().uri(uri, vars).header(HttpHeaders.AUTHORIZATION, session.bearer()).exchange();
+	}
+
+	/**
+	 * Marks the user as Google-linked, which is what makes their email count as verified
+	 * (UserService#hasVerifiedEmail). GoogleLoginTests covers the real linking path.
+	 */
+	public void verifyEmail(Session session) {
+		this.jdbc.update("UPDATE users SET google_subject = ? WHERE id = ?", "google-" + session.userId(),
+				session.userId());
 	}
 
 	public MvcTestResult createAccount(Session session, String name, String balance, String currency,

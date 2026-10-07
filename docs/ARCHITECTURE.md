@@ -1,6 +1,6 @@
 # Family Budget — Architecture
 
-Status: draft v0.8 · 2026-10-07
+Status: draft v0.9 · 2026-10-07
 Companion doc: [PLAN.md](../../PLAN.md) (workspace root) (roadmap, phases, open decisions)
 Frontend (Angular SPA): [frontend ARCHITECTURE.md][frontend-arch]
 
@@ -186,10 +186,27 @@ every member can see what it tracks.
 A user belongs to at most one family in v1. There is no `activeFamilyId` column on the
 user: `family_members` is keyed by `user_id`, so the membership row *is* the user's
 current family (one source of truth, nothing to keep in sync). Other modules ask
-`FamilyService.currentFamilyId(userId)`. Creating/joining a family is a deliberate
-action via a single-use invite code (8 chars, 7-day expiry) that an admin shares out of
-band — no email delivery in v1. Users who don't belong to a family only ever see private
-data. Multi-family-per-user is listed as a v2 idea, not built now (§7); it would bring
+`FamilyService.currentFamilyId(userId)`. Users who don't belong to a family only ever see
+private data.
+
+**Invitations** are keyed by email. An admin invites an address (it doesn't need an
+account yet); the invitation shows up for whoever signs in with that email
+(`GET /invitations`) and is valid for 7 days. Nothing is emailed: the web and (later)
+mobile clients list pending invitations themselves.
+
+- Only a user whose email is verified may list, accept or decline invitations
+  (`403 email-not-verified`). Password registration doesn't verify the email, so in
+  practice that means the account is linked to Google.
+- Accepting moves the user: they leave their current family first. If they were its last
+  member, that family is deleted; if they were its only admin, the longest-standing
+  remaining member becomes admin. (Leaving explicitly still requires promoting someone
+  first, `409 last-admin`.)
+- A family has at most **10 seats**: members plus pending invitations. Inviting fails with
+  `409 family-full`; revoking a pending invitation frees its seat. Invites and accepts
+  lock the family row, so concurrent ones can't overshoot the limit.
+- One pending invitation per family and email (`409 already-invited`); inviting a current
+  member fails with `409 already-member`. Declined, revoked and accepted invitations are
+  kept with their status for history. Multi-family-per-user is listed as a v2 idea, not built now (§7); it would bring
 back an explicit active-family choice.
 
 ### 3.3 Relationship to current frontend types
@@ -262,7 +279,7 @@ com.familybudget
   common/            # ProblemDetail error handling, pagination, auditing base entity
   security/          # JWT filter, OAuth2 success handler, JWT issuing/validation, roles
   user/              # User entity, registration, profile
-  family/            # Family, FamilyMembership, invites
+  family/            # Family, FamilyMembership, email invitations
   account/
   category/
   transaction/
@@ -315,7 +332,7 @@ stable.
 
 Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `invalid-refresh-token`, `email-not-verified`, `unauthenticated`, `already-in-family`,
-`invalid-invite`, `admin-required`, `last-admin`, `cannot-remove-self`, `no-family`,
+`invalid-invite`, `already-invited`, `already-member`, `family-full`, `admin-required`, `last-admin`, `cannot-remove-self`, `no-family`,
 `visibility-immutable`, `category-type-immutable`, `account-in-use`, `category-in-use`,
 `invalid-transaction`, `currency-mismatch`, `transaction-not-editable`,
 `category-not-shared`, `budget-exists`.
@@ -403,6 +420,8 @@ only changes those two beans.
   require `ADMIN`.
 - A family always keeps at least one `ADMIN`: the last admin can't leave or be demoted
   while other members remain. The last member leaving deletes the family.
+- Email invitations can only be used by an account whose email is verified (Google-linked),
+  since the email is the only thing tying an invitation to a person (§3.2).
 
 ### 6.4 Transport/infra
 

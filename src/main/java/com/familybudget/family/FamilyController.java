@@ -1,8 +1,10 @@
 package com.familybudget.family;
 
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -40,15 +42,21 @@ class FamilyController {
 		return this.familyService.current(userId);
 	}
 
-	@PostMapping("/current/invites")
+	@PostMapping("/current/invitations")
 	@ResponseStatus(HttpStatus.CREATED)
-	InviteView createInvite(@CurrentUserId UUID userId) {
-		return this.familyService.createInvite(userId);
+	InvitationView invite(@CurrentUserId UUID userId, @Valid @RequestBody InviteRequest request) {
+		return this.familyService.invite(userId, request.email());
 	}
 
-	@PostMapping("/join")
-	FamilyView join(@CurrentUserId UUID userId, @Valid @RequestBody JoinFamilyRequest request) {
-		return this.familyService.join(userId, request.code());
+	@GetMapping("/current/invitations")
+	List<InvitationView> invitations(@CurrentUserId UUID userId) {
+		return this.familyService.sentInvitations(userId);
+	}
+
+	@DeleteMapping("/current/invitations/{invitationId}")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void revokeInvitation(@CurrentUserId UUID userId, @PathVariable UUID invitationId) {
+		this.familyService.revokeInvitation(userId, invitationId);
 	}
 
 	@PostMapping("/current/leave")
@@ -72,7 +80,7 @@ class FamilyController {
 	record CreateFamilyRequest(@NotBlank @Size(max = 100) String name) {
 	}
 
-	record JoinFamilyRequest(@NotBlank String code) {
+	record InviteRequest(@NotBlank @Email @Size(max = 320) String email) {
 	}
 
 	record ChangeRoleRequest(@NotNull FamilyRole role) {

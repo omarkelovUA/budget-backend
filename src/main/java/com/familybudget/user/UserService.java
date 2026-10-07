@@ -81,7 +81,19 @@ public class UserService {
 		return this.users.findAllById(ids).stream().map(UserEntity::toView).toList();
 	}
 
-	private static String normalizeEmail(String email) {
+	public Optional<UserView> findByEmail(String email) {
+		return this.users.findByEmail(normalizeEmail(email)).map(UserEntity::toView);
+	}
+
+	/**
+	 * Whether the user's email is known to be theirs. Password registration doesn't verify
+	 * it, so only an account linked to Google (which checked the email) counts.
+	 */
+	public boolean hasVerifiedEmail(UUID id) {
+		return this.users.findById(id).map((user) -> user.getGoogleSubject() != null).orElse(false);
+	}
+
+	public static String normalizeEmail(String email) {
 		return email.strip().toLowerCase(Locale.ROOT);
 	}
 

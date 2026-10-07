@@ -7,6 +7,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 
 import com.familybudget.IntegrationTest;
@@ -22,9 +23,9 @@ class CategoryFlowTests {
 	private final MockMvcTester mvc;
 
 	@Autowired
-	CategoryFlowTests(MockMvcTester mvc) {
+	CategoryFlowTests(MockMvcTester mvc, JdbcTemplate jdbc) {
 		this.mvc = mvc;
-		this.api = new TestApi(mvc);
+		this.api = new TestApi(mvc, jdbc);
 	}
 
 	@Test
