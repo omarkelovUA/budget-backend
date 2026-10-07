@@ -254,6 +254,52 @@ class FamilyFlowTests {
 	}
 
 	@Test
+	void theLastMemberLeavingKeepsTheFamilysCategoriesAndBudgetsAsPrivate() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		this.api.family(alice, bob);
+		UUID food = this.api.category(alice, "expense", "Food", "shared");
+		UUID card = this.api.account(alice, "Card", "100");
+		this.api.pay(alice, card, food, "30", "2026-10-01");
+		assertThat(this.api.post(alice, "/api/v1/budgets", """
+				{"categoryId": "%s", "period": "2026-10", "plannedAmount": 100, "visibility": "shared"}
+				""".formatted(food))).hasStatus(HttpStatus.CREATED);
+
+		// Bob leaving doesn't delete the family, so nothing changes hands yet.
+		assertThat(this.api.postEmpty(bob, "/api/v1/families/current/leave")).hasStatus(HttpStatus.NO_CONTENT);
+		assertThat(this.api.get(alice, "/api/v1/categories")).bodyJson()
+			.extractingPath("$[0].visibility")
+			.isEqualTo("shared");
+
+		assertThat(this.api.postEmpty(alice, "/api/v1/families/current/leave")).hasStatus(HttpStatus.NO_CONTENT);
+
+		assertThat(this.api.get(alice, "/api/v1/categories")).bodyJson()
+			.extractingPath("$[0].visibility")
+			.isEqualTo("private");
+		MvcTestResult budgets = this.api.get(alice, "/api/v1/budgets");
+		assertThat(budgets).bodyJson().extractingPath("$[0].visibility").isEqualTo("private");
+		assertThat(budgets).bodyJson().extractingPath("$[0].factAmount").isEqualTo(30.0);
+		assertThat(this.api.get(bob, "/api/v1/categories")).bodyJson().extractingPath("$.length()").isEqualTo(0);
+	}
+
+	@Test
+	void movingOutAsTheLastMemberKeepsTheOldFamilysCategories() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		createFamily(alice, "Smiths");
+		createFamily(bob, "Solo");
+		this.api.category(bob, "expense", "Hobby", "shared");
+
+		assertThat(this.api.join(alice, bob)).hasStatusOk();
+
+		MvcTestResult bobsCategories = this.api.get(bob, "/api/v1/categories");
+		assertThat(bobsCategories).bodyJson().extractingPath("$[0].name").isEqualTo("Hobby");
+		assertThat(bobsCategories).bodyJson().extractingPath("$[0].visibility").isEqualTo("private");
+		// It stays Bob's: his new family doesn't get it.
+		assertThat(this.api.get(alice, "/api/v1/categories")).bodyJson().extractingPath("$.length()").isEqualTo(0);
+	}
+
+	@Test
 	void adminCanRemoveMembersOfTheirOwnFamilyOnly() {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);

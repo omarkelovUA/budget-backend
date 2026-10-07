@@ -1,6 +1,6 @@
 # Family Budget — Architecture
 
-Status: draft v0.11 · 2026-10-07
+Status: draft v0.12 · 2026-10-07
 Companion doc: [PLAN.md](../../PLAN.md) (workspace root) (roadmap, phases, open decisions)
 Frontend (Angular SPA): [frontend ARCHITECTURE.md][frontend-arch]
 
@@ -213,9 +213,14 @@ Other ownership rules:
 - Categories that are still referenced (transactions, budgets) can't be deleted
   (`409 category-in-use`), enforced by foreign keys.
 - A category's or budget's `owner_id` has no foreign key (it points at users *or*
-  families). Deleting a family (its last member leaving) currently leaves its shared
-  categories and budgets orphaned — to be fixed with a
-  `FamilyDeleted` application event (Spring Modulith's event registry is already set up).
+  families). When a family is deleted (its last member leaves, directly or by accepting
+  an invitation elsewhere), the family module publishes `FamilyDeleted`. The category
+  and budget modules then turn that family's categories and budgets into the last
+  member's private ones, synchronously in the same database transaction. They can't
+  simply be dropped, because transactions still reference the categories, and the last
+  member was the only person who could see them anyway. V12 did the same for families
+  deleted earlier: owner = whoever recorded the category's latest payment; orphans
+  without any transactions were deleted.
 - `SYSTEM`-owned default categories are deferred: the frontend's `Visibility` type has no
   value to show them with.
 

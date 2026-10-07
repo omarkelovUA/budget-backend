@@ -195,7 +195,7 @@ public class FamilyService {
 		List<FamilyMemberEntity> all = this.members.findByFamilyIdOrderByJoinedAt(familyId);
 		if (all.size() == 1) {
 			this.members.delete(member);
-			this.families.deleteById(familyId);
+			deleteFamily(familyId, userId);
 		}
 		else {
 			requireNotLastAdmin(member);
@@ -239,9 +239,14 @@ public class FamilyService {
 		if (others.isEmpty()) {
 			// Move the membership row out before the family's delete cascades to its members.
 			this.members.flush();
-			this.families.deleteById(oldFamilyId);
+			deleteFamily(oldFamilyId, member.getUserId());
 		}
 		membershipEnded(member.getUserId(), oldFamilyId);
+	}
+
+	private void deleteFamily(UUID familyId, UUID lastMemberId) {
+		this.families.deleteById(familyId);
+		this.events.publishEvent(new FamilyDeleted(familyId, lastMemberId));
 	}
 
 	private void membershipEnded(UUID userId, UUID familyId) {
