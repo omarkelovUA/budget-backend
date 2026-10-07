@@ -31,6 +31,10 @@ class UserEntity {
 
 	private @Nullable String googleSubject;
 
+	/** See {@link UserService#sessionVersion}. */
+	@Column(nullable = false)
+	private int sessionVersion;
+
 	@CreationTimestamp
 	@Column(nullable = false, updatable = false)
 	private @Nullable Instant createdAt;
@@ -72,6 +76,20 @@ class UserEntity {
 
 	void linkGoogle(String googleSubject) {
 		this.googleSubject = googleSubject;
+	}
+
+	int getSessionVersion() {
+		return this.sessionVersion;
+	}
+
+	/**
+	 * Google just proved who owns this email, while the password was set by whoever
+	 * registered it, unverified. Dropping the password and every session locks out anyone
+	 * who squatted the address before its owner showed up.
+	 */
+	void reclaimForVerifiedOwner() {
+		this.passwordHash = null;
+		this.sessionVersion++;
 	}
 
 	UserView toView() {

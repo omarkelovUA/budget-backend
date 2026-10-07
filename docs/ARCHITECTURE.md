@@ -1,6 +1,6 @@
 # Family Budget — Architecture
 
-Status: draft v0.10 · 2026-10-07
+Status: draft v0.11 · 2026-10-07
 Companion doc: [PLAN.md](../../PLAN.md) (workspace root) (roadmap, phases, open decisions)
 Frontend (Angular SPA): [frontend ARCHITECTURE.md][frontend-arch]
 
@@ -78,6 +78,7 @@ erDiagram
         string displayName
         string passwordHash "null if OAuth-only"
         string googleSubject "null until Google login"
+        int sessionVersion "bumped to end all sessions"
     }
     FAMILY {
         uuid id
@@ -438,9 +439,19 @@ only changes those two beans.
 
 ### 6.2 Token handling
 
-- Short-lived **access token** (HS256 JWT, 15 min, `sub` = user id, plus `email`),
-  returned in the response body, held in frontend memory only (never localStorage, to
-  limit XSS blast radius).
+- Short-lived **access token** (HS256 JWT, 15 min, `sub` = user id, plus `email` and
+  `sv` = the user's session version), returned in the response body, held in frontend
+  memory only (never localStorage, to limit XSS blast radius).
+- **Ending all sessions at once**: bumping `users.session_version` makes every access
+  token issued before it fail validation on the next request (`SessionVersionValidator`,
+  one primary-key lookup per request). `UserSessionsInvalidated` makes the security
+  module revoke all of the user's refresh tokens in the same database transaction.
+- **Google reclaims an unverified account**: password sign-up never verifies the email.
+  So when a Google login (with a Google-verified email) links to an existing password
+  account, that account's password is removed and all of its sessions end as above.
+  Whoever registered the address first, possibly not its owner, is locked out. The cost
+  is that a genuine user who signed up with a password and later uses Google can only
+  sign in with Google from then on (there's no set-password flow yet).
 - Longer-lived **refresh token** (30 days): an opaque random value, not a JWT, stored
   server-side only as a SHA-256 hash in `refresh_tokens`. Sent as an httpOnly + Secure +
   SameSite=Strict cookie scoped to `Path=/api/v1/auth`, so it only reaches the auth
@@ -450,7 +461,8 @@ only changes those two beans.
   refresh tokens are revoked; within the grace window (e.g. two tabs refreshing at once)
   it's just rejected, so the other tab's fresh token keeps working.
 - **Logout** revokes the presented refresh token in the database and clears the cookie.
-  Access tokens aren't denylisted — they simply expire within 15 min.
+  Its access token isn't denylisted — it simply expires within 15 min (only a session
+  version bump ends access tokens early).
 - The auth endpoints ignore any `Authorization` header, so the SPA can call
   `/auth/refresh` with an expired access token still attached.
 - A daily job (`RefreshTokenCleanup`, cron `app.security.refresh-token.cleanup-cron`)

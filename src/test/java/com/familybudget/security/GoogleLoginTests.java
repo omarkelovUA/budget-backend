@@ -11,6 +11,8 @@ import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -78,6 +80,37 @@ class GoogleLoginTests {
 				.extractingPath("$.user.id")
 				.isEqualTo(existing.userId().toString());
 		}
+	}
+
+	/**
+	 * Someone registers the victim's email with a password (never verified); the victim
+	 * later signs in with Google. The squatter must lose the account completely: password,
+	 * refresh sessions and access tokens already handed out.
+	 */
+	@Test
+	void linkingGoogleLocksOutWhoeverRegisteredTheEmailWithAPassword() throws Exception {
+		Session squatter = TestUsers.register(this.mvc);
+
+		Cookie owners = googleLogin("google-" + UUID.randomUUID(), squatter.email(), true).getCookie("refresh_token");
+
+		assertThat(this.mvc.post()
+			.uri("/api/v1/auth/login")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+					{"email": "%s", "password": "%s"}
+					""".formatted(squatter.email(), TestUsers.PASSWORD))).hasStatus(HttpStatus.UNAUTHORIZED);
+		assertThat(this.mvc.get().uri("/api/v1/users/me").header(HttpHeaders.AUTHORIZATION, squatter.bearer()))
+			.hasStatus(HttpStatus.UNAUTHORIZED);
+		assertThat(this.mvc.post().uri("/api/v1/auth/refresh").cookie(squatter.refreshCookie()))
+			.hasStatus(HttpStatus.UNAUTHORIZED);
+
+		// The owner's fresh session works, and so does the token it refreshes into.
+		MvcTestResult refreshed = this.mvc.post().uri("/api/v1/auth/refresh").cookie(owners).exchange();
+		assertThat(refreshed).hasStatusOk();
+		assertThat(this.mvc.get()
+			.uri("/api/v1/users/me")
+			.header(HttpHeaders.AUTHORIZATION, "Bearer " + TestUsers.json(refreshed, "$.accessToken")))
+			.hasStatusOk();
 	}
 
 	@Test

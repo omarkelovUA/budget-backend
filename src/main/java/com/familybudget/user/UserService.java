@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.jspecify.annotations.Nullable;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -24,12 +25,15 @@ public class UserService {
 
 	private final PasswordEncoder passwordEncoder;
 
+	private final ApplicationEventPublisher events;
+
 	/** Compared against when the email is unknown, so login timing doesn't reveal it. */
 	private final String dummyPasswordHash;
 
-	UserService(UserRepository users, PasswordEncoder passwordEncoder) {
+	UserService(UserRepository users, PasswordEncoder passwordEncoder, ApplicationEventPublisher events) {
 		this.users = users;
 		this.passwordEncoder = passwordEncoder;
+		this.events = events;
 		this.dummyPasswordHash = passwordEncoder.encode("dummy-password-for-timing");
 	}
 
@@ -53,7 +57,9 @@ public class UserService {
 
 	/**
 	 * Finds the user for a Google login, linking an existing account with the same
-	 * (Google-verified) email or creating a new one.
+	 * (Google-verified) email or creating a new one. Password sign-up never verified that
+	 * email, so linking also removes the password and ends every existing session: whoever
+	 * registered it may not be the person Google just vouched for.
 	 */
 	@Transactional
 	public UserView findOrCreateFromGoogle(String subject, @Nullable String email, boolean emailVerified,
@@ -67,9 +73,14 @@ public class UserService {
 					"Google account has no verified email");
 		}
 		String normalizedEmail = normalizeEmail(email);
-		UserEntity user = this.users.findByEmail(normalizedEmail)
+		Optional<UserEntity> existing = this.users.findByEmail(normalizedEmail);
+		UserEntity user = existing
 			.orElseGet(() -> new UserEntity(normalizedEmail, displayNameOrDefault(name, normalizedEmail)));
 		user.linkGoogle(subject);
+		if (existing.isPresent()) {
+			user.reclaimForVerifiedOwner();
+			this.events.publishEvent(new UserSessionsInvalidated(user.getId()));
+		}
 		return this.users.save(user).toView();
 	}
 
@@ -91,6 +102,14 @@ public class UserService {
 	 */
 	public boolean hasVerifiedEmail(UUID id) {
 		return this.users.findById(id).map((user) -> user.getGoogleSubject() != null).orElse(false);
+	}
+
+	/**
+	 * Access tokens carry this as their {@code sv} claim and stop being accepted once it
+	 * changes, so bumping it ends every session within the request, not after the TTL.
+	 */
+	public int sessionVersion(UUID id) {
+		return this.users.findById(id).map(UserEntity::getSessionVersion).orElse(-1);
 	}
 
 	public static String normalizeEmail(String email) {

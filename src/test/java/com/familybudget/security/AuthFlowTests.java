@@ -2,6 +2,9 @@ package com.familybudget.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Instant;
+import java.util.List;
+
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,6 +12,11 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
@@ -28,6 +36,9 @@ class AuthFlowTests {
 
 	@Autowired
 	private RefreshTokenCleanup cleanup;
+
+	@Autowired
+	private JwtEncoder jwtEncoder;
 
 	@Test
 	void registerIssuesAccessTokenAndHardenedRefreshCookie() {
@@ -109,6 +120,27 @@ class AuthFlowTests {
 				.extractingPath("$.type")
 				.isEqualTo("https://familybudget.app/problems/unauthenticated");
 		}
+	}
+
+	@Test
+	void accessTokensWithoutTheCurrentSessionVersionAreRejected() {
+		Session session = TestUsers.register(this.mvc);
+		Instant now = Instant.now();
+		JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
+			.issuer(AccessTokenService.ISSUER)
+			.subject(session.userId().toString())
+			.issuedAt(now)
+			.expiresAt(now.plusSeconds(60));
+		// e.g. a token issued before session versions existed, or before an invalidation.
+		for (JwtClaimsSet stale : List.of(claims.build(), claims.claim("sv", 7).build())) {
+			String token = this.jwtEncoder
+				.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), stale))
+				.getTokenValue();
+			assertThat(this.mvc.get().uri("/api/v1/users/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+				.hasStatus(HttpStatus.UNAUTHORIZED);
+		}
+		assertThat(this.mvc.get().uri("/api/v1/users/me").header(HttpHeaders.AUTHORIZATION, session.bearer()))
+			.hasStatusOk();
 	}
 
 	@Test
