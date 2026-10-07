@@ -1,5 +1,6 @@
 package com.familybudget.security;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -43,8 +44,9 @@ class AuthController {
 	}
 
 	@PostMapping("/register")
-	ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
-		UserView user = this.userService.register(request.email(), request.displayName(), request.password());
+	ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest httpRequest) {
+		UserView user = this.userService.register(request.email(), request.displayName(), request.password(),
+				ClientRegion.defaultCurrency(httpRequest));
 		return startSession(HttpStatus.CREATED, user);
 	}
 

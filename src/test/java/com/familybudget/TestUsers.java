@@ -51,7 +51,7 @@ public final class TestUsers {
 
 	public record Session(UUID userId, String email, String accessToken, Cookie refreshCookie) {
 
-		static Session from(MvcTestResult result) {
+		public static Session from(MvcTestResult result) {
 			Cookie cookie = result.getResponse().getCookie("refresh_token");
 			assertThat(cookie).isNotNull();
 			return new Session(UUID.fromString(json(result, "$.user.id")), json(result, "$.user.email"),

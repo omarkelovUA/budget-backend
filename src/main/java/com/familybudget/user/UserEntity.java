@@ -31,6 +31,10 @@ class UserEntity {
 
 	private @Nullable String googleSubject;
 
+	/** ISO 4217; picked from the region at sign-up, then changed in settings. */
+	@Column(nullable = false)
+	private String defaultCurrency;
+
 	/** See {@link UserService#sessionVersion}. */
 	@Column(nullable = false)
 	private int sessionVersion;
@@ -42,9 +46,18 @@ class UserEntity {
 	protected UserEntity() {
 	}
 
-	UserEntity(String email, String displayName) {
+	UserEntity(String email, String displayName, String defaultCurrency) {
 		this.email = email;
 		this.displayName = displayName;
+		this.defaultCurrency = defaultCurrency;
+	}
+
+	String getDefaultCurrency() {
+		return this.defaultCurrency;
+	}
+
+	void setDefaultCurrency(String defaultCurrency) {
+		this.defaultCurrency = defaultCurrency;
 	}
 
 	UUID getId() {

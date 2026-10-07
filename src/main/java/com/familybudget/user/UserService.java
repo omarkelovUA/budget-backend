@@ -1,6 +1,7 @@
 package com.familybudget.user;
 
 import java.util.Collection;
+import java.util.Currency;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -38,12 +39,12 @@ public class UserService {
 	}
 
 	@Transactional
-	public UserView register(String email, String displayName, String rawPassword) {
+	public UserView register(String email, String displayName, String rawPassword, String defaultCurrency) {
 		String normalizedEmail = normalizeEmail(email);
 		if (this.users.existsByEmail(normalizedEmail)) {
 			throw new ApiException(HttpStatus.CONFLICT, "email-taken", "An account with this email already exists");
 		}
-		UserEntity user = new UserEntity(normalizedEmail, displayName.strip());
+		UserEntity user = new UserEntity(normalizedEmail, displayName.strip(), defaultCurrency);
 		user.setPasswordHash(this.passwordEncoder.encode(rawPassword));
 		return this.users.save(user).toView();
 	}
@@ -63,7 +64,7 @@ public class UserService {
 	 */
 	@Transactional
 	public UserView findOrCreateFromGoogle(String subject, @Nullable String email, boolean emailVerified,
-			@Nullable String name) {
+			@Nullable String name, String defaultCurrency) {
 		Optional<UserEntity> linked = this.users.findByGoogleSubject(subject);
 		if (linked.isPresent()) {
 			return linked.get().toView();
@@ -75,7 +76,8 @@ public class UserService {
 		String normalizedEmail = normalizeEmail(email);
 		Optional<UserEntity> existing = this.users.findByEmail(normalizedEmail);
 		UserEntity user = existing
-			.orElseGet(() -> new UserEntity(normalizedEmail, displayNameOrDefault(name, normalizedEmail)));
+			.orElseGet(() -> new UserEntity(normalizedEmail, displayNameOrDefault(name, normalizedEmail),
+					defaultCurrency));
 		user.linkGoogle(subject);
 		if (existing.isPresent()) {
 			user.reclaimForVerifiedOwner();
@@ -90,6 +92,30 @@ public class UserService {
 
 	public List<UserView> getAll(Collection<UUID> ids) {
 		return this.users.findAllById(ids).stream().map(UserEntity::toView).toList();
+	}
+
+	public UserSettingsView settings(UUID id) {
+		return new UserSettingsView(entity(id).getDefaultCurrency());
+	}
+
+	@Transactional
+	public UserSettingsView updateSettings(UUID id, UserSettingsView settings) {
+		UserEntity user = entity(id);
+		user.setDefaultCurrency(requireCurrency(settings.defaultCurrency()));
+		return new UserSettingsView(user.getDefaultCurrency());
+	}
+
+	private UserEntity entity(UUID id) {
+		return this.users.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
+	}
+
+	private static String requireCurrency(String code) {
+		try {
+			return Currency.getInstance(code).getCurrencyCode();
+		}
+		catch (IllegalArgumentException ex) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "invalid-currency", "Unknown currency code: " + code);
+		}
 	}
 
 	public Optional<UserView> findByEmail(String email) {

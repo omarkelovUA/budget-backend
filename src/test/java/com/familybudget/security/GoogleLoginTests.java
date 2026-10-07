@@ -114,6 +114,22 @@ class GoogleLoginTests {
 	}
 
 	@Test
+	void googleSignUpPicksTheDefaultCurrencyFromTheBrowsersRegion() throws Exception {
+		MockHttpServletRequest request = new MockHttpServletRequest();
+		request.addHeader(HttpHeaders.ACCEPT_LANGUAGE, "de-DE,de;q=0.9");
+		Cookie cookie = googleLogin(request, "google-" + UUID.randomUUID(), TestUsers.uniqueEmail(), true)
+			.getCookie("refresh_token");
+		String accessToken = TestUsers.json(this.mvc.post().uri("/api/v1/auth/refresh").cookie(cookie).exchange(),
+				"$.accessToken");
+
+		assertThat(this.mvc.get()
+			.uri("/api/v1/users/me/settings")
+			.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)).bodyJson()
+			.extractingPath("$.defaultCurrency")
+			.isEqualTo("EUR");
+	}
+
+	@Test
 	void googleLoginWithAnUnverifiedEmailIsRejected() throws Exception {
 		Session existing = TestUsers.register(this.mvc);
 
@@ -125,11 +141,16 @@ class GoogleLoginTests {
 	}
 
 	private MockHttpServletResponse googleLogin(String subject, String email, boolean emailVerified) throws Exception {
+		return googleLogin(new MockHttpServletRequest(), subject, email, emailVerified);
+	}
+
+	private MockHttpServletResponse googleLogin(MockHttpServletRequest request, String subject, String email,
+			boolean emailVerified) throws Exception {
 		OidcIdToken idToken = new OidcIdToken("id-token", Instant.now(), Instant.now().plusSeconds(60),
 				Map.of("sub", subject, "email", email, "email_verified", emailVerified, "name", "Google User"));
 		DefaultOidcUser user = new DefaultOidcUser(List.of(new SimpleGrantedAuthority("OIDC_USER")), idToken);
 		MockHttpServletResponse response = new MockHttpServletResponse();
-		this.successHandler.onAuthenticationSuccess(new MockHttpServletRequest(), response,
+		this.successHandler.onAuthenticationSuccess(request, response,
 				new OAuth2AuthenticationToken(user, user.getAuthorities(), "google"));
 		return response;
 	}
