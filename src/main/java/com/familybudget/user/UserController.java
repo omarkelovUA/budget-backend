@@ -38,13 +38,15 @@ class UserController {
 	@PutMapping("/me/settings")
 	UserSettingsView updateSettings(@CurrentUserId UUID userId, @Valid @RequestBody SettingsRequest request) {
 		return this.userService.updateSettings(userId,
-				new UserSettingsView(request.language(), request.defaultCurrency(), request.usedCurrencies()));
+				new UserSettingsView(request.language(), request.defaultCurrency(), request.usedCurrencies(),
+						request.theme()));
 	}
 
 	record SettingsRequest(@NotNull @Pattern(regexp = "[a-z]{2}", message = "must be an ISO 639-1 code") String language,
 			@NotNull @Pattern(regexp = "[A-Z]{3}", message = "must be an ISO 4217 code") String defaultCurrency,
 			@NotNull @Size(min = 1, max = UserService.MAX_USED_CURRENCIES) List<@NotNull @Pattern(regexp = "[A-Z]{3}",
-					message = "must be an ISO 4217 code") String> usedCurrencies) {
+					message = "must be an ISO 4217 code") String> usedCurrencies,
+			@NotNull String theme) {
 	}
 
 }

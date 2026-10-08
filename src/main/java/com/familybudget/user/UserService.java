@@ -120,8 +120,11 @@ public class UserService {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "default-currency-not-used",
 					"The default currency must be one of the used currencies");
 		}
+		Theme theme = Theme.fromCode(settings.theme())
+			.orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "unsupported-theme",
+					"Unsupported theme: " + settings.theme()));
 		UserEntity user = entity(id);
-		user.changeSettings(language, defaultCurrency, usedCurrencies);
+		user.changeSettings(language, defaultCurrency, usedCurrencies, theme);
 		return user.settings();
 	}
 

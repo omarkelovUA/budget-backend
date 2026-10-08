@@ -82,6 +82,7 @@ erDiagram
         string defaultCurrency "ISO 4217, from region at sign-up"
         string[] usedCurrencies "ISO 4217, offered by pickers"
         string language "ISO 639-1, from region at sign-up"
+        string theme "light | dark | system"
     }
     FAMILY {
         uuid id
@@ -228,8 +229,10 @@ Other ownership rules:
 - `SYSTEM`-owned default categories are deferred: the frontend's `Visibility` type has no
   value to show them with.
 
-**User settings** (`GET`/`PUT /users/me/settings`, M13 + M15):
-`{language, defaultCurrency, usedCurrencies}`; `PUT` replaces all three. All are set at
+**User settings** (`GET`/`PUT /users/me/settings`, M13 + M15 + M16):
+`{language, defaultCurrency, usedCurrencies, theme}`; `PUT` replaces all four.
+`theme` is `light`, `dark` or `system` (follow the device; the default), anything else
+fails with `400 unsupported-theme`. All are set at
 sign-up from the client's `Accept-Language` (password and Google sign-up alike; a linked
 Google account keeps its settings):
 - `defaultCurrency`: the first locale whose country has a currency wins; a language
@@ -438,7 +441,8 @@ Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `category-not-shared`, `budget-exists`, `not-account-owner`, `account-read-only`,
 `account-closed`, `grantee-not-in-family`, `close-target-required`, `invalid-currency`,
 `transient-account`, `recipient-not-in-family`, `insufficient-in-transit`,
-`unsupported-language`, `invalid-used-currencies`, `default-currency-not-used`.
+`unsupported-language`, `invalid-used-currencies`, `default-currency-not-used`,
+`unsupported-theme`.
 
 `detail` texts are English and meant for developers and logs; the backend has no
 `MessageSource`. Clients show their own, translated text keyed by the `type` slug (the

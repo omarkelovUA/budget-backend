@@ -30,7 +30,7 @@ For http localhost, add `REFRESH_COOKIE_SECURE=false`.
 - Mappings are written as `/api/v1/...`. The wire format uses lower-case enums and
   `visibility: private|shared`.
 - **Migrations** live in `src/main/resources/db/migration/V<n>__name.sql`; the latest is
-  `V15`. Write each as additive SQL with a backfill. Data migrations get a
+  `V16`. Write each as additive SQL with a backfill. Data migrations get a
   `*MigrationTests` that migrates to `n-1`, inserts data, then migrates to latest.
 - **Tests:**
   - Integration tests are annotated `@IntegrationTest` and use `MockMvcTester`, plus the
@@ -42,7 +42,7 @@ For http localhost, add `REFRESH_COOKIE_SECURE=false`.
   - Categories and budgets are private or shared with the family.
   - Transient accounts carry family transfers.
   - Details are in `docs/ARCHITECTURE.md` §3.2 and §6.3.
-- **User settings** (`GET`/`PUT /users/me/settings`): `language`,
+- **User settings** (`GET`/`PUT /users/me/settings`): `language`, `theme`,
   `defaultCurrency`, `usedCurrencies`. The sign-up region comes from `Accept-Language`
   (`ClientRegion` → `SignUpRegion`). Supported languages are in `SupportedLanguage`.
 - **Performance:**

@@ -125,7 +125,7 @@ class GoogleLoginTests {
 		assertThat(this.mvc.get()
 			.uri("/api/v1/users/me/settings")
 			.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)).bodyJson().isLenientlyEqualTo("""
-					{"language": "en", "defaultCurrency": "EUR", "usedCurrencies": ["EUR"]}
+					{"language": "en", "defaultCurrency": "EUR", "usedCurrencies": ["EUR"], "theme": "system"}
 					""");
 	}
 

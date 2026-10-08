@@ -42,13 +42,13 @@ class UserSettingsTests {
 		Session noHeader = TestUsers.register(this.mvc);
 
 		assertThat(this.api.get(polish, SETTINGS)).bodyJson().isLenientlyEqualTo("""
-				{"language": "en", "defaultCurrency": "PLN", "usedCurrencies": ["PLN"]}
+				{"language": "en", "defaultCurrency": "PLN", "usedCurrencies": ["PLN"], "theme": "system"}
 				""");
 		assertThat(this.api.get(ukrainian, SETTINGS)).bodyJson().isLenientlyEqualTo("""
-				{"language": "uk", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"]}
+				{"language": "uk", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "system"}
 				""");
 		assertThat(this.api.get(noHeader, SETTINGS)).bodyJson().isLenientlyEqualTo("""
-				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"]}
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "system"}
 				""");
 	}
 
@@ -57,12 +57,12 @@ class UserSettingsTests {
 		Session alice = TestUsers.register(this.mvc);
 
 		assertThat(this.api.put(alice, SETTINGS, """
-				{"language": "uk", "defaultCurrency": "EUR", "usedCurrencies": ["EUR", "UAH", "EUR", "USD"]}
+				{"language": "uk", "defaultCurrency": "EUR", "usedCurrencies": ["EUR", "UAH", "EUR", "USD"], "theme": "dark"}
 				""")).hasStatusOk().bodyJson().isStrictlyEqualTo("""
-				{"language": "uk", "defaultCurrency": "EUR", "usedCurrencies": ["EUR", "UAH", "USD"]}
+				{"language": "uk", "defaultCurrency": "EUR", "usedCurrencies": ["EUR", "UAH", "USD"], "theme": "dark"}
 				""");
 		assertThat(this.api.get(alice, SETTINGS)).bodyJson().isStrictlyEqualTo("""
-				{"language": "uk", "defaultCurrency": "EUR", "usedCurrencies": ["EUR", "UAH", "USD"]}
+				{"language": "uk", "defaultCurrency": "EUR", "usedCurrencies": ["EUR", "UAH", "USD"], "theme": "dark"}
 				""");
 	}
 
@@ -71,30 +71,35 @@ class UserSettingsTests {
 		Session alice = TestUsers.register(this.mvc);
 
 		assertProblem(alice, """
-				{"language": "en", "defaultCurrency": "XYZ", "usedCurrencies": ["XYZ"]}
+				{"language": "en", "defaultCurrency": "XYZ", "usedCurrencies": ["XYZ"], "theme": "light"}
 				""", "invalid-currency");
 		assertProblem(alice, """
-				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH", "XYZ"]}
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH", "XYZ"], "theme": "light"}
 				""", "invalid-currency");
 		assertProblem(alice, """
-				{"language": "de", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"]}
+				{"language": "de", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light"}
 				""", "unsupported-language");
 		assertProblem(alice, """
-				{"language": "en", "defaultCurrency": "EUR", "usedCurrencies": ["UAH"]}
+				{"language": "en", "defaultCurrency": "EUR", "usedCurrencies": ["UAH"], "theme": "light"}
 				""", "default-currency-not-used");
+		assertProblem(alice, """
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "blue"}
+				""", "unsupported-theme");
 		for (String malformed : new String[] { """
-				{"language": "en", "defaultCurrency": "eur", "usedCurrencies": ["eur"]}
+				{"language": "en", "defaultCurrency": "eur", "usedCurrencies": ["eur"], "theme": "light"}
 				""", """
-				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": []}
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": [], "theme": "light"}
 				""", """
-				{"language": "EN", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"]}
+				{"language": "EN", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light"}
 				""", """
 				{"defaultCurrency": "UAH"}
+				""", """
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"]}
 				""" }) {
 			assertThat(this.api.put(alice, SETTINGS, malformed)).hasStatus(HttpStatus.BAD_REQUEST);
 		}
 		assertThat(this.api.get(alice, SETTINGS)).bodyJson().isLenientlyEqualTo("""
-				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"]}
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "system"}
 				""");
 	}
 

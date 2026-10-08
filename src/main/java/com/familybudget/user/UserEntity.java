@@ -48,6 +48,10 @@ class UserEntity {
 	@Column(nullable = false)
 	private String language;
 
+	/** A {@link Theme} code; new users follow their device. */
+	@Column(nullable = false)
+	private String theme = Theme.SYSTEM.code();
+
 	/** See {@link UserService#sessionVersion}. */
 	@Column(nullable = false)
 	private int sessionVersion;
@@ -68,11 +72,12 @@ class UserEntity {
 	}
 
 	UserSettingsView settings() {
-		return new UserSettingsView(this.language, this.defaultCurrency, List.copyOf(this.usedCurrencies));
+		return new UserSettingsView(this.language, this.defaultCurrency, List.copyOf(this.usedCurrencies), this.theme);
 	}
 
-	void changeSettings(String language, String defaultCurrency, List<String> usedCurrencies) {
+	void changeSettings(String language, String defaultCurrency, List<String> usedCurrencies, Theme theme) {
 		this.language = language;
+		this.theme = theme.code();
 		this.defaultCurrency = defaultCurrency;
 		this.usedCurrencies = new ArrayList<>(usedCurrencies);
 	}
