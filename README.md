@@ -59,7 +59,10 @@ All optional for local use; the defaults work out of the box.
 2. Add the redirect URI `http://localhost:4200/login/oauth2/code/google` (the frontend's
    dev server proxies it here). Use `http://localhost:8080/login/oauth2/code/google`
    only if you open the backend directly.
-3. Start the backend with `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` set.
+3. Copy `.env.example` to `.env` and fill in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+   `.env` is git-ignored, and `docker compose` reads it, so
+   `docker compose --profile app up -d` picks the values up. When running with `./mvnw`,
+   export them instead.
 
 ## API overview
 
