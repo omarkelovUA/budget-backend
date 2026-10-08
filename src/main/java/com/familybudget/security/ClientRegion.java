@@ -7,7 +7,7 @@ import java.util.Locale;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
 
-import com.familybudget.user.RegionCurrency;
+import com.familybudget.user.SignUpRegion;
 
 /**
  * The region a new user signs up from, as their browser or app reports it in
@@ -19,11 +19,11 @@ final class ClientRegion {
 	private ClientRegion() {
 	}
 
-	static String defaultCurrency(HttpServletRequest request) {
+	static SignUpRegion of(HttpServletRequest request) {
 		// Without the header, getLocales() returns the server's default locale instead.
 		List<Locale> locales = (request.getHeader(HttpHeaders.ACCEPT_LANGUAGE) != null)
 				? Collections.list(request.getLocales()) : List.of();
-		return RegionCurrency.forLocales(locales);
+		return SignUpRegion.forLocales(locales);
 	}
 
 }

@@ -1,6 +1,8 @@
 package com.familybudget.user;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
@@ -10,6 +12,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.jspecify.annotations.Nullable;
 
 @Entity
@@ -35,6 +39,15 @@ class UserEntity {
 	@Column(nullable = false)
 	private String defaultCurrency;
 
+	/** ISO 4217 codes pickers offer, in the user's order; always holds the default. */
+	@JdbcTypeCode(SqlTypes.ARRAY)
+	@Column(nullable = false)
+	private List<String> usedCurrencies = new ArrayList<>();
+
+	/** ISO 639-1, one of {@link SupportedLanguage}; picked from the region at sign-up. */
+	@Column(nullable = false)
+	private String language;
+
 	/** See {@link UserService#sessionVersion}. */
 	@Column(nullable = false)
 	private int sessionVersion;
@@ -46,18 +59,22 @@ class UserEntity {
 	protected UserEntity() {
 	}
 
-	UserEntity(String email, String displayName, String defaultCurrency) {
+	UserEntity(String email, String displayName, SignUpRegion region) {
 		this.email = email;
 		this.displayName = displayName;
-		this.defaultCurrency = defaultCurrency;
+		this.language = region.language();
+		this.defaultCurrency = region.defaultCurrency();
+		this.usedCurrencies = new ArrayList<>(List.of(region.defaultCurrency()));
 	}
 
-	String getDefaultCurrency() {
-		return this.defaultCurrency;
+	UserSettingsView settings() {
+		return new UserSettingsView(this.language, this.defaultCurrency, List.copyOf(this.usedCurrencies));
 	}
 
-	void setDefaultCurrency(String defaultCurrency) {
+	void changeSettings(String language, String defaultCurrency, List<String> usedCurrencies) {
+		this.language = language;
 		this.defaultCurrency = defaultCurrency;
+		this.usedCurrencies = new ArrayList<>(usedCurrencies);
 	}
 
 	UUID getId() {

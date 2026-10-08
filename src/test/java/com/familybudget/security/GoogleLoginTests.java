@@ -114,7 +114,7 @@ class GoogleLoginTests {
 	}
 
 	@Test
-	void googleSignUpPicksTheDefaultCurrencyFromTheBrowsersRegion() throws Exception {
+	void googleSignUpPicksTheSettingsFromTheBrowsersRegion() throws Exception {
 		MockHttpServletRequest request = new MockHttpServletRequest();
 		request.addHeader(HttpHeaders.ACCEPT_LANGUAGE, "de-DE,de;q=0.9");
 		Cookie cookie = googleLogin(request, "google-" + UUID.randomUUID(), TestUsers.uniqueEmail(), true)
@@ -124,9 +124,9 @@ class GoogleLoginTests {
 
 		assertThat(this.mvc.get()
 			.uri("/api/v1/users/me/settings")
-			.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)).bodyJson()
-			.extractingPath("$.defaultCurrency")
-			.isEqualTo("EUR");
+			.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)).bodyJson().isLenientlyEqualTo("""
+					{"language": "en", "defaultCurrency": "EUR", "usedCurrencies": ["EUR"]}
+					""");
 	}
 
 	@Test

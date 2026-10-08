@@ -1,7 +1,7 @@
 # Family Budget — Architecture
 
 Status: draft v0.13 · 2026-10-07
-Companion doc: [PLAN.md](../../PLAN.md) (workspace root) (roadmap, phases, open decisions)
+Companion doc: [PLAN.md](../../.docs/PLAN.md) (workspace `.docs/`) (roadmap, phases, open decisions)
 Frontend (Angular SPA): [frontend ARCHITECTURE.md][frontend-arch]
 
 [frontend-arch]: https://github.com/omarkelovUA/budget-front/blob/main/docs/ARCHITECTURE.md
@@ -18,7 +18,7 @@ private. A user can:
 
 This document describes the system as a whole and the backend: domain model, REST API,
 security and backend structure. It is intentionally stack-accurate but
-implementation-light — concrete code arrives phase by phase per [PLAN.md](../../PLAN.md).
+implementation-light — concrete code arrives phase by phase per [PLAN.md](../../.docs/PLAN.md).
 The Angular SPA has its own [frontend ARCHITECTURE.md][frontend-arch]; §4 lists only what
 the backend expects from it.
 
@@ -80,6 +80,8 @@ erDiagram
         string googleSubject "null until Google login"
         int sessionVersion "bumped to end all sessions"
         string defaultCurrency "ISO 4217, from region at sign-up"
+        string[] usedCurrencies "ISO 4217, offered by pickers"
+        string language "ISO 639-1, from region at sign-up"
     }
     FAMILY {
         uuid id
@@ -226,12 +228,22 @@ Other ownership rules:
 - `SYSTEM`-owned default categories are deferred: the frontend's `Visibility` type has no
   value to show them with.
 
-**User settings** (`GET`/`PUT /users/me/settings`, M13): for now only
-`defaultCurrency`. It's set at sign-up from the client's `Accept-Language` (password and
-Google sign-up alike): the first locale whose country has a currency wins; a language
-without a country stands for its main country (`uk` → UA, `pl` → PL, …; widely shared
-languages like `en` are skipped); otherwise UAH. Unknown codes fail with
-`400 invalid-currency`.
+**User settings** (`GET`/`PUT /users/me/settings`, M13 + M15):
+`{language, defaultCurrency, usedCurrencies}`; `PUT` replaces all three. All are set at
+sign-up from the client's `Accept-Language` (password and Google sign-up alike; a linked
+Google account keeps its settings):
+- `defaultCurrency`: the first locale whose country has a currency wins; a language
+  without a country stands for its main country (`uk` → UA, `pl` → PL, …; widely shared
+  languages like `en` are skipped); otherwise UAH. Unknown codes fail with
+  `400 invalid-currency`.
+- `language` (ISO 639-1, the UI language): the first locale with a supported language
+  (`SupportedLanguage`: `en`, `uk`) wins, else a country whose language is supported
+  (`ru-UA` → `uk`), else `en`. Others fail with `400 unsupported-language`. Users from
+  before M15 got `uk`, the UI's only language until then.
+- `usedCurrencies`: the currencies the user's pickers offer, in order, 1–20 of them,
+  duplicates dropped; starts as `[defaultCurrency]`, which it must always contain
+  (`400 default-currency-not-used`). It doesn't restrict which currency an account can
+  have.
 
 **Family transfers** (M14) let members send each other money even when the receiver's
 accounts are hidden from the sender. Each ordered pair (sender → recipient) and currency
@@ -425,7 +437,12 @@ Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `invalid-transaction`, `currency-mismatch`, `transaction-not-editable`,
 `category-not-shared`, `budget-exists`, `not-account-owner`, `account-read-only`,
 `account-closed`, `grantee-not-in-family`, `close-target-required`, `invalid-currency`,
-`transient-account`, `recipient-not-in-family`, `insufficient-in-transit`.
+`transient-account`, `recipient-not-in-family`, `insufficient-in-transit`,
+`unsupported-language`, `invalid-used-currencies`, `default-currency-not-used`.
+
+`detail` texts are English and meant for developers and logs; the backend has no
+`MessageSource`. Clients show their own, translated text keyed by the `type` slug (the
+frontend: `errors.<slug>` in its translation files).
 
 401/403 raised by the security filters themselves (missing/invalid access token) get the
 same shape (`unauthenticated` / `forbidden`) via custom entry point and access-denied
@@ -567,5 +584,5 @@ only changes those two beans.
 
 ## 9. Open questions
 
-Tracked with owners/status in [PLAN.md §Open decisions](../../PLAN.md#open-decisions) —
+Tracked with owners/status in [PLAN.md §Open decisions](../../.docs/PLAN.md#open-decisions) —
 not repeated here to avoid the two docs drifting out of sync.

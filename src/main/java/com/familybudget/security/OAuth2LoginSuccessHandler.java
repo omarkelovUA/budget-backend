@@ -57,7 +57,7 @@ class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 		try {
 			user = this.userService.findOrCreateFromGoogle(oidcUser.getSubject(), oidcUser.getEmail(),
 					Boolean.TRUE.equals(oidcUser.getEmailVerified()), oidcUser.getFullName(),
-					ClientRegion.defaultCurrency(request));
+					ClientRegion.of(request));
 		}
 		catch (ApiException ex) {
 			response.sendRedirect(this.failureUrl + "&reason=" + ex.getType());

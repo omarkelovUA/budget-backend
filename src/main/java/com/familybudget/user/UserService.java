@@ -28,6 +28,8 @@ public class UserService {
 
 	private final ApplicationEventPublisher events;
 
+	public static final int MAX_USED_CURRENCIES = 20;
+
 	/** Compared against when the email is unknown, so login timing doesn't reveal it. */
 	private final String dummyPasswordHash;
 
@@ -39,12 +41,12 @@ public class UserService {
 	}
 
 	@Transactional
-	public UserView register(String email, String displayName, String rawPassword, String defaultCurrency) {
+	public UserView register(String email, String displayName, String rawPassword, SignUpRegion region) {
 		String normalizedEmail = normalizeEmail(email);
 		if (this.users.existsByEmail(normalizedEmail)) {
 			throw new ApiException(HttpStatus.CONFLICT, "email-taken", "An account with this email already exists");
 		}
-		UserEntity user = new UserEntity(normalizedEmail, displayName.strip(), defaultCurrency);
+		UserEntity user = new UserEntity(normalizedEmail, displayName.strip(), region);
 		user.setPasswordHash(this.passwordEncoder.encode(rawPassword));
 		return this.users.save(user).toView();
 	}
@@ -64,7 +66,7 @@ public class UserService {
 	 */
 	@Transactional
 	public UserView findOrCreateFromGoogle(String subject, @Nullable String email, boolean emailVerified,
-			@Nullable String name, String defaultCurrency) {
+			@Nullable String name, SignUpRegion region) {
 		Optional<UserEntity> linked = this.users.findByGoogleSubject(subject);
 		if (linked.isPresent()) {
 			return linked.get().toView();
@@ -76,8 +78,7 @@ public class UserService {
 		String normalizedEmail = normalizeEmail(email);
 		Optional<UserEntity> existing = this.users.findByEmail(normalizedEmail);
 		UserEntity user = existing
-			.orElseGet(() -> new UserEntity(normalizedEmail, displayNameOrDefault(name, normalizedEmail),
-					defaultCurrency));
+			.orElseGet(() -> new UserEntity(normalizedEmail, displayNameOrDefault(name, normalizedEmail), region));
 		user.linkGoogle(subject);
 		if (existing.isPresent()) {
 			user.reclaimForVerifiedOwner();
@@ -95,14 +96,33 @@ public class UserService {
 	}
 
 	public UserSettingsView settings(UUID id) {
-		return new UserSettingsView(entity(id).getDefaultCurrency());
+		return entity(id).settings();
 	}
 
+	/** Replaces all settings; the used currencies keep their order, duplicates dropped. */
 	@Transactional
 	public UserSettingsView updateSettings(UUID id, UserSettingsView settings) {
+		String language = SupportedLanguage.fromCode(settings.language())
+			.orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "unsupported-language",
+					"Unsupported language: " + settings.language()))
+			.code();
+		String defaultCurrency = requireCurrency(settings.defaultCurrency());
+		List<String> usedCurrencies = settings.usedCurrencies()
+			.stream()
+			.map(UserService::requireCurrency)
+			.distinct()
+			.toList();
+		if (usedCurrencies.isEmpty() || usedCurrencies.size() > MAX_USED_CURRENCIES) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "invalid-used-currencies",
+					"Between 1 and " + MAX_USED_CURRENCIES + " used currencies are allowed");
+		}
+		if (!usedCurrencies.contains(defaultCurrency)) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "default-currency-not-used",
+					"The default currency must be one of the used currencies");
+		}
 		UserEntity user = entity(id);
-		user.setDefaultCurrency(requireCurrency(settings.defaultCurrency()));
-		return new UserSettingsView(user.getDefaultCurrency());
+		user.changeSettings(language, defaultCurrency, usedCurrencies);
+		return user.settings();
 	}
 
 	private UserEntity entity(UUID id) {

@@ -46,7 +46,7 @@ class AuthController {
 	@PostMapping("/register")
 	ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest httpRequest) {
 		UserView user = this.userService.register(request.email(), request.displayName(), request.password(),
-				ClientRegion.defaultCurrency(httpRequest));
+				ClientRegion.of(httpRequest));
 		return startSession(HttpStatus.CREATED, user);
 	}
 
