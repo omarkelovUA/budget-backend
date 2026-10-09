@@ -85,18 +85,21 @@ class UserSettingsTests {
 		assertProblem(alice, """
 				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "blue", "primaryHue": 150}
 				""", "unsupported-theme");
+		for (String hue : new String[] { "-1", "360", "null" }) {
+			assertThat(this.api.put(alice, SETTINGS, """
+					{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light", "primaryHue": %s}
+					""".formatted(hue))).hasStatus(HttpStatus.BAD_REQUEST)
+				.bodyJson()
+				.isLenientlyEqualTo("""
+						{"status": 400, "detail": "Invalid request content."}
+						""");
+		}
 		for (String malformed : new String[] { """
 				{"language": "en", "defaultCurrency": "eur", "usedCurrencies": ["eur"], "theme": "light", "primaryHue": 150}
 				""", """
 				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": [], "theme": "light", "primaryHue": 150}
 				""", """
 				{"language": "EN", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light", "primaryHue": 150}
-				""", """
-				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light", "primaryHue": -1}
-				""", """
-				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light", "primaryHue": 360}
-				""", """
-				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light"}
 				""", """
 				{"defaultCurrency": "UAH"}
 				""", """
