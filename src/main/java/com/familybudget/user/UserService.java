@@ -124,7 +124,7 @@ public class UserService {
 			.orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "unsupported-theme",
 					"Unsupported theme: " + settings.theme()));
 		UserEntity user = entity(id);
-		user.changeSettings(language, defaultCurrency, usedCurrencies, theme);
+		user.changeSettings(language, defaultCurrency, usedCurrencies, theme, settings.primaryHue());
 		return user.settings();
 	}
 

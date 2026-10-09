@@ -52,6 +52,10 @@ class UserEntity {
 	@Column(nullable = false)
 	private String theme = Theme.SYSTEM.code();
 
+	/** The OKLCH hue (0–359) of the UI's primary colour; new users get the "dollar" green. */
+	@Column(nullable = false)
+	private short primaryHue = 150;
+
 	/** See {@link UserService#sessionVersion}. */
 	@Column(nullable = false)
 	private int sessionVersion;
@@ -72,12 +76,15 @@ class UserEntity {
 	}
 
 	UserSettingsView settings() {
-		return new UserSettingsView(this.language, this.defaultCurrency, List.copyOf(this.usedCurrencies), this.theme);
+		return new UserSettingsView(this.language, this.defaultCurrency, List.copyOf(this.usedCurrencies), this.theme,
+				this.primaryHue);
 	}
 
-	void changeSettings(String language, String defaultCurrency, List<String> usedCurrencies, Theme theme) {
+	void changeSettings(String language, String defaultCurrency, List<String> usedCurrencies, Theme theme,
+			int primaryHue) {
 		this.language = language;
 		this.theme = theme.code();
+		this.primaryHue = (short) primaryHue;
 		this.defaultCurrency = defaultCurrency;
 		this.usedCurrencies = new ArrayList<>(usedCurrencies);
 	}

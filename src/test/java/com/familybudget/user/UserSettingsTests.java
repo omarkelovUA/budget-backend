@@ -42,13 +42,13 @@ class UserSettingsTests {
 		Session noHeader = TestUsers.register(this.mvc);
 
 		assertThat(this.api.get(polish, SETTINGS)).bodyJson().isLenientlyEqualTo("""
-				{"language": "en", "defaultCurrency": "PLN", "usedCurrencies": ["PLN"], "theme": "system"}
+				{"language": "en", "defaultCurrency": "PLN", "usedCurrencies": ["PLN"], "theme": "system", "primaryHue": 150}
 				""");
 		assertThat(this.api.get(ukrainian, SETTINGS)).bodyJson().isLenientlyEqualTo("""
-				{"language": "uk", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "system"}
+				{"language": "uk", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "system", "primaryHue": 150}
 				""");
 		assertThat(this.api.get(noHeader, SETTINGS)).bodyJson().isLenientlyEqualTo("""
-				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "system"}
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "system", "primaryHue": 150}
 				""");
 	}
 
@@ -57,12 +57,12 @@ class UserSettingsTests {
 		Session alice = TestUsers.register(this.mvc);
 
 		assertThat(this.api.put(alice, SETTINGS, """
-				{"language": "uk", "defaultCurrency": "EUR", "usedCurrencies": ["EUR", "UAH", "EUR", "USD"], "theme": "dark"}
+				{"language": "uk", "defaultCurrency": "EUR", "usedCurrencies": ["EUR", "UAH", "EUR", "USD"], "theme": "dark", "primaryHue": 305}
 				""")).hasStatusOk().bodyJson().isStrictlyEqualTo("""
-				{"language": "uk", "defaultCurrency": "EUR", "usedCurrencies": ["EUR", "UAH", "USD"], "theme": "dark"}
+				{"language": "uk", "defaultCurrency": "EUR", "usedCurrencies": ["EUR", "UAH", "USD"], "theme": "dark", "primaryHue": 305}
 				""");
 		assertThat(this.api.get(alice, SETTINGS)).bodyJson().isStrictlyEqualTo("""
-				{"language": "uk", "defaultCurrency": "EUR", "usedCurrencies": ["EUR", "UAH", "USD"], "theme": "dark"}
+				{"language": "uk", "defaultCurrency": "EUR", "usedCurrencies": ["EUR", "UAH", "USD"], "theme": "dark", "primaryHue": 305}
 				""");
 	}
 
@@ -71,26 +71,32 @@ class UserSettingsTests {
 		Session alice = TestUsers.register(this.mvc);
 
 		assertProblem(alice, """
-				{"language": "en", "defaultCurrency": "XYZ", "usedCurrencies": ["XYZ"], "theme": "light"}
+				{"language": "en", "defaultCurrency": "XYZ", "usedCurrencies": ["XYZ"], "theme": "light", "primaryHue": 150}
 				""", "invalid-currency");
 		assertProblem(alice, """
-				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH", "XYZ"], "theme": "light"}
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH", "XYZ"], "theme": "light", "primaryHue": 150}
 				""", "invalid-currency");
 		assertProblem(alice, """
-				{"language": "de", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light"}
+				{"language": "de", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light", "primaryHue": 150}
 				""", "unsupported-language");
 		assertProblem(alice, """
-				{"language": "en", "defaultCurrency": "EUR", "usedCurrencies": ["UAH"], "theme": "light"}
+				{"language": "en", "defaultCurrency": "EUR", "usedCurrencies": ["UAH"], "theme": "light", "primaryHue": 150}
 				""", "default-currency-not-used");
 		assertProblem(alice, """
-				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "blue"}
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "blue", "primaryHue": 150}
 				""", "unsupported-theme");
 		for (String malformed : new String[] { """
-				{"language": "en", "defaultCurrency": "eur", "usedCurrencies": ["eur"], "theme": "light"}
+				{"language": "en", "defaultCurrency": "eur", "usedCurrencies": ["eur"], "theme": "light", "primaryHue": 150}
 				""", """
-				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": [], "theme": "light"}
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": [], "theme": "light", "primaryHue": 150}
 				""", """
-				{"language": "EN", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light"}
+				{"language": "EN", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light", "primaryHue": 150}
+				""", """
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light", "primaryHue": -1}
+				""", """
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light", "primaryHue": 360}
+				""", """
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "light"}
 				""", """
 				{"defaultCurrency": "UAH"}
 				""", """
@@ -99,7 +105,7 @@ class UserSettingsTests {
 			assertThat(this.api.put(alice, SETTINGS, malformed)).hasStatus(HttpStatus.BAD_REQUEST);
 		}
 		assertThat(this.api.get(alice, SETTINGS)).bodyJson().isLenientlyEqualTo("""
-				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "system"}
+				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "system", "primaryHue": 150}
 				""");
 	}
 

@@ -83,6 +83,7 @@ erDiagram
         string[] usedCurrencies "ISO 4217, offered by pickers"
         string language "ISO 639-1, from region at sign-up"
         string theme "light | dark | system"
+        smallint primaryHue "OKLCH hue 0-359, default 150"
     }
     FAMILY {
         uuid id
@@ -229,10 +230,12 @@ Other ownership rules:
 - `SYSTEM`-owned default categories are deferred: the frontend's `Visibility` type has no
   value to show them with.
 
-**User settings** (`GET`/`PUT /users/me/settings`, M13 + M15 + M16):
-`{language, defaultCurrency, usedCurrencies, theme}`; `PUT` replaces all four.
+**User settings** (`GET`/`PUT /users/me/settings`, M13 + M15 + M16 + M17):
+`{language, defaultCurrency, usedCurrencies, theme, primaryHue}`; `PUT` replaces all five.
 `theme` is `light`, `dark` or `system` (follow the device; the default), anything else
-fails with `400 unsupported-theme`. All are set at
+fails with `400 unsupported-theme`. `primaryHue` is the OKLCH hue (0–359) the UI
+palette derives from; new users get 150 (a "dollar" green), and a missing or
+out-of-range value is a `400` validation error. The others are set at
 sign-up from the client's `Accept-Language` (password and Google sign-up alike; a linked
 Google account keeps its settings):
 - `defaultCurrency`: the first locale whose country has a currency wins; a language

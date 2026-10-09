@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.UUID;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -39,14 +41,14 @@ class UserController {
 	UserSettingsView updateSettings(@CurrentUserId UUID userId, @Valid @RequestBody SettingsRequest request) {
 		return this.userService.updateSettings(userId,
 				new UserSettingsView(request.language(), request.defaultCurrency(), request.usedCurrencies(),
-						request.theme()));
+						request.theme(), request.primaryHue()));
 	}
 
 	record SettingsRequest(@NotNull @Pattern(regexp = "[a-z]{2}", message = "must be an ISO 639-1 code") String language,
 			@NotNull @Pattern(regexp = "[A-Z]{3}", message = "must be an ISO 4217 code") String defaultCurrency,
 			@NotNull @Size(min = 1, max = UserService.MAX_USED_CURRENCIES) List<@NotNull @Pattern(regexp = "[A-Z]{3}",
 					message = "must be an ISO 4217 code") String> usedCurrencies,
-			@NotNull String theme) {
+			@NotNull String theme, @NotNull @Min(0) @Max(359) Integer primaryHue) {
 	}
 
 }
