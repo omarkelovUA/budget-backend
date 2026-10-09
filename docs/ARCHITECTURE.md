@@ -432,7 +432,9 @@ is declared an *open* module since every feature uses it.
 A single `@RestControllerAdvice` in `common` translates domain exceptions into consistent
 `ProblemDetail` responses. Domain errors are `ApiException(status, type, message)` (with
 `NotFoundException` as a shorthand); the `type` slug becomes the problem `type` URI.
-Bean Validation failures are handled by Spring MVC's built-in `ProblemDetail` support.
+Requests Spring MVC rejects before a service runs (Bean Validation failures, unreadable
+JSON, wrong or missing parameters) keep its built-in `ProblemDetail`, but with the
+`validation-failed` type.
 The frontend maps problem types to user-facing messages (§4), so this shape has to stay
 stable.
 
@@ -445,7 +447,7 @@ Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `account-closed`, `grantee-not-in-family`, `close-target-required`, `invalid-currency`,
 `transient-account`, `recipient-not-in-family`, `insufficient-in-transit`,
 `unsupported-language`, `invalid-used-currencies`, `default-currency-not-used`,
-`unsupported-theme`.
+`unsupported-theme`, `validation-failed`.
 
 `detail` texts are English and meant for developers and logs; the backend has no
 `MessageSource`. Clients show their own, translated text keyed by the `type` slug (the

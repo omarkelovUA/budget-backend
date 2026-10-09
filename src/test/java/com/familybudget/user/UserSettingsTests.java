@@ -91,8 +91,8 @@ class UserSettingsTests {
 					""".formatted(hue))).hasStatus(HttpStatus.BAD_REQUEST)
 				.bodyJson()
 				.isLenientlyEqualTo("""
-						{"status": 400, "detail": "Invalid request content."}
-						""");
+						{"type": "%svalidation-failed", "status": 400}
+						""".formatted(TestApi.PROBLEMS));
 		}
 		for (String malformed : new String[] { """
 				{"language": "en", "defaultCurrency": "eur", "usedCurrencies": ["eur"], "theme": "light", "primaryHue": 150}
