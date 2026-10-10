@@ -289,7 +289,7 @@ class FamilyFlowTests {
 		Session bob = TestUsers.register(this.mvc);
 		Session carol = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
-		this.api.clearDefaults(alice, bob);
+		this.api.clearDefaults(alice, bob, carol);
 		UUID food = this.api.category(alice, "expense", "Food", "shared");
 		UUID card = this.api.account(alice, "Card", "100");
 		this.api.pay(alice, card, food, "30", "2026-10-01");

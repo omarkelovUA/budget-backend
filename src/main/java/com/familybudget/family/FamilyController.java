@@ -76,6 +76,12 @@ class FamilyController {
 		return this.familyService.changeRole(userId, memberUserId, request.role());
 	}
 
+	@PostMapping("/current/categories-reviewed")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void categoriesReviewed(@CurrentUserId UUID userId) {
+		this.familyService.markCategoriesReviewed(userId);
+	}
+
 	@GetMapping("/current/join-requests")
 	List<IncomingJoinRequestView> joinRequests(@CurrentUserId UUID userId) {
 		return this.familyService.incomingJoinRequests(userId);

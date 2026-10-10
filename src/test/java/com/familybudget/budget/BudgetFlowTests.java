@@ -35,6 +35,7 @@ class BudgetFlowTests {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
+		this.api.clearDefaults(alice);
 		UUID groceries = this.api.category(alice, "expense", "Groceries", "shared");
 		UUID alicesCard = this.api.account(alice, "Alice card", "1000");
 		UUID bobsCard = this.api.account(bob, "Bob card", "1000");

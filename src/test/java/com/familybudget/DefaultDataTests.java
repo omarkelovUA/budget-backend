@@ -43,7 +43,7 @@ class DefaultDataTests {
 	}
 
 	@Test
-	void signUpCreatesPrivateIncomeAndExpenseCategories() {
+	void signUpCreatesIncomeAndExpenseCategoriesSharedWithTheFamily() {
 		MvcTestResult categories = this.api.get(TestUsers.register(this.mvc), "/api/v1/categories");
 
 		assertThat(categories).bodyJson()
@@ -58,7 +58,7 @@ class DefaultDataTests {
 		assertThat(categories).bodyJson()
 			.extractingPath("$[*].visibility")
 			.asArray()
-			.containsOnly("private");
+			.containsOnly("shared");
 	}
 
 	@Test

@@ -3,8 +3,13 @@ package com.familybudget.category;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import org.jspecify.annotations.Nullable;
+import org.springframework.context.ApplicationEventPublisher;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -17,8 +22,15 @@ import com.familybudget.common.NotFoundException;
 import com.familybudget.common.OwnerType;
 import com.familybudget.common.Visibility;
 import com.familybudget.family.FamilyService;
+import com.familybudget.user.UserService;
+import com.familybudget.user.UserView;
 
-/** Public API of the category module; every query is scoped per ARCHITECTURE.md §6.3. */
+/**
+ * Public API of the category module; every query is scoped per ARCHITECTURE.md §6.3.
+ * Family categories are shared by every member; only the admin changes, deletes or hides
+ * them. A member never sees two categories with the same type and name: their personal
+ * one is merged into the family's (ARCHITECTURE.md §3.1).
+ */
 @Service
 @Transactional(readOnly = true)
 public class CategoryService {
@@ -27,9 +39,16 @@ public class CategoryService {
 
 	private final FamilyService familyService;
 
-	CategoryService(CategoryRepository categories, FamilyService familyService) {
+	private final UserService userService;
+
+	private final ApplicationEventPublisher events;
+
+	CategoryService(CategoryRepository categories, FamilyService familyService, UserService userService,
+			ApplicationEventPublisher events) {
 		this.categories = categories;
 		this.familyService = familyService;
+		this.userService = userService;
+		this.events = events;
 	}
 
 	public List<CategoryView> list(UUID userId) {
@@ -40,18 +59,25 @@ public class CategoryService {
 			.toList();
 	}
 
+	/** A family category made by a member other than the admin is live at once; the admin is told. */
 	@Transactional
 	CategoryView create(UUID userId, CategoryRequest request) {
 		AccessScope scope = this.familyService.scopeFor(userId);
+		requireUnique(scope, request.type(), request.name(), null);
 		CategoryEntity category = new CategoryEntity(AccessScope.ownerTypeFor(request.visibility()),
 				scope.ownerIdFor(request.visibility()), request.type());
 		category.apply(request);
+		if (request.visibility() == Visibility.SHARED) {
+			category.shareWith(scope.ownerIdFor(Visibility.SHARED), addedBy(userId));
+		}
 		return this.categories.save(category).toView();
 	}
 
 	@Transactional
 	CategoryView update(UUID userId, UUID id, CategoryRequest request) {
-		CategoryEntity category = accessible(this.familyService.scopeFor(userId), id);
+		AccessScope scope = this.familyService.scopeFor(userId);
+		CategoryEntity category = accessible(scope, id);
+		requireManageable(userId, category);
 		if (Visibility.of(category.getOwnerType()) != request.visibility()) {
 			throw new ApiException(HttpStatus.CONFLICT, "visibility-immutable",
 					"A category can't be moved between private and shared");
@@ -61,13 +87,19 @@ public class CategoryService {
 			throw new ApiException(HttpStatus.CONFLICT, "category-type-immutable",
 					"A category can't change between income and expense");
 		}
+		requireUnique(scope, request.type(), request.name(), id);
 		category.apply(request);
+		if (category.getOwnerType() == OwnerType.FAMILY) {
+			// A member may have a personal category with the new name.
+			mergeDuplicates(category.getOwnerId());
+		}
 		return category.toView();
 	}
 
 	@Transactional
 	void delete(UUID userId, UUID id) {
 		CategoryEntity category = accessible(this.familyService.scopeFor(userId), id);
+		requireManageable(userId, category);
 		try {
 			this.categories.delete(category);
 			this.categories.flush();
@@ -75,6 +107,75 @@ public class CategoryService {
 		catch (DataIntegrityViolationException ex) {
 			throw new ApiException(HttpStatus.CONFLICT, "category-in-use",
 					"Delete this category's transactions and budgets first");
+		}
+	}
+
+	/**
+	 * Makes the caller's personal category a family one (the family can't have one with the
+	 * same name: the caller would see both). Other members' namesakes merge into it.
+	 */
+	@Transactional
+	CategoryView share(UUID userId, UUID id) {
+		AccessScope scope = this.familyService.scopeFor(userId);
+		CategoryEntity category = accessible(scope, id);
+		if (category.getOwnerType() == OwnerType.FAMILY) {
+			return category.toView();
+		}
+		UUID familyId = scope.ownerIdFor(Visibility.SHARED);
+		category.shareWith(familyId, addedBy(userId));
+		this.categories.flush();
+		mergeDuplicates(familyId);
+		return category.toView();
+	}
+
+	/**
+	 * The admin takes a family category back as their personal one; refused while anyone
+	 * else has data in it (CategoryHiding).
+	 */
+	@Transactional
+	CategoryView hide(UUID userId, UUID id) {
+		UUID familyId = this.familyService.requireAdminOf(userId);
+		CategoryEntity category = this.categories.findById(id)
+			.filter((c) -> c.getOwnerType() == OwnerType.FAMILY && c.getOwnerId().equals(familyId))
+			.orElseThrow(() -> new NotFoundException("Category not found"));
+		this.events.publishEvent(new CategoryHiding(id, userId));
+		category.hideTo(userId);
+		return category.toView();
+	}
+
+	/** Family categories members other than the admin added since the admin last looked. */
+	List<AddedCategoryView> addedByMembers(UUID userId) {
+		List<CategoryEntity> added = familyCategories(this.familyService.requireAdminOf(userId)).stream()
+			.filter((category) -> category.getAddedBy() != null)
+			.toList();
+		Map<UUID, UserView> users = this.userService
+			.getAll(added.stream().map(CategoryEntity::getAddedBy).map(Objects::requireNonNull).toList())
+			.stream()
+			.collect(Collectors.toMap(UserView::id, Function.identity()));
+		return added.stream().map((category) -> {
+			UserView user = users.get(category.getAddedBy());
+			return new AddedCategoryView(category.toView(), (user != null) ? user.displayName() : "");
+		}).toList();
+	}
+
+	@Transactional
+	void markAddedSeen(UUID userId) {
+		familyCategories(this.familyService.requireAdminOf(userId)).forEach(CategoryEntity::markSeen);
+	}
+
+	/**
+	 * Folds every member's personal category into the family category with the same type
+	 * and name: run when someone joins, a category becomes a family one, or one is renamed.
+	 */
+	@Transactional
+	void mergeDuplicates(UUID familyId) {
+		List<CategoryEntity> family = familyCategories(familyId);
+		for (CategoryEntity personal : this.categories.findByOwnerTypeAndOwnerIdIn(OwnerType.USER,
+				this.familyService.memberIds(familyId))) {
+			family.stream()
+				.filter((into) -> into.sameAs(personal.getType(), personal.getName()))
+				.findFirst()
+				.ifPresent((into) -> merge(personal, into));
 		}
 	}
 
@@ -100,11 +201,58 @@ public class CategoryService {
 			.toView();
 	}
 
+	/**
+	 * Views for payments the user may see: someone else's personal category comes back as
+	 * {@link CategoryView#unknown}, so its name stays private.
+	 */
+	public Map<UUID, CategoryView> viewsFor(UUID userId, Collection<UUID> ids) {
+		AccessScope scope = this.familyService.scopeFor(userId);
+		return this.categories.findByIdIn(ids)
+			.stream()
+			.collect(Collectors.toMap(CategoryEntity::getId,
+					(category) -> scope.canAccess(category.getOwnerType(), category.getOwnerId()) ? category.toView()
+							: CategoryView.unknown(category.getId(), category.getType()),
+					(a, b) -> a));
+	}
+
 	/** Views regardless of visibility: callers only use them for data the scope already sees. */
 	public Map<UUID, CategoryView> views(Collection<UUID> ids) {
 		return this.categories.findByIdIn(ids)
 			.stream()
 			.collect(Collectors.toMap(CategoryEntity::getId, CategoryEntity::toView, (a, b) -> a));
+	}
+
+	private void merge(CategoryEntity from, CategoryEntity into) {
+		this.events.publishEvent(new CategoryMerged(from.getId(), into.getId()));
+		this.categories.delete(from);
+		this.categories.flush();
+	}
+
+	private List<CategoryEntity> familyCategories(UUID familyId) {
+		return this.categories.findByOwnerTypeAndOwnerIdIn(OwnerType.FAMILY, List.of(familyId));
+	}
+
+	/** Who to tell the admin about: a member other than the admin. */
+	private @Nullable UUID addedBy(UUID userId) {
+		return this.familyService.isAdmin(userId) ? null : userId;
+	}
+
+	/** Only the admin changes or deletes a family category; members just use it. */
+	private void requireManageable(UUID userId, CategoryEntity category) {
+		if (category.getOwnerType() == OwnerType.FAMILY) {
+			this.familyService.requireAdminOf(userId);
+		}
+	}
+
+	/** A user never sees two categories with the same type and name. */
+	private void requireUnique(AccessScope scope, CategoryType type, String name, @Nullable UUID excludeId) {
+		boolean taken = this.categories.findVisible(scope.userId(), scope.familyId())
+			.stream()
+			.anyMatch((category) -> category.sameAs(type, name) && !category.getId().equals(excludeId));
+		if (taken) {
+			throw new ApiException(HttpStatus.CONFLICT, "category-exists",
+					"There's already a category with this name and type");
+		}
 	}
 
 	private CategoryEntity accessible(AccessScope scope, UUID id) {

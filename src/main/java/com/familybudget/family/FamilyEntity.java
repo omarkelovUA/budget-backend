@@ -30,6 +30,9 @@ class FamilyEntity {
 	@Column(nullable = false, updatable = false)
 	private @Nullable Instant createdAt;
 
+	/** When the admin chose which categories the family sees, on its first other member. */
+	private @Nullable Instant categoriesReviewedAt;
+
 	protected FamilyEntity() {
 	}
 
@@ -51,6 +54,16 @@ class FamilyEntity {
 
 	void rename(String name) {
 		this.name = name;
+	}
+
+	boolean categoriesReviewed() {
+		return this.categoriesReviewedAt != null;
+	}
+
+	void markCategoriesReviewed() {
+		if (this.categoriesReviewedAt == null) {
+			this.categoriesReviewedAt = Instant.now();
+		}
 	}
 
 }

@@ -16,6 +16,25 @@ interface BudgetRepository extends JpaRepository<BudgetEntity, UUID> {
 			+ " order by b.period desc, b.createdAt")
 	List<BudgetEntity> findVisible(UUID userId, @Nullable UUID familyId);
 
+	/** Budgets on the category other than {@code userId}'s own personal ones. */
+	@Query(nativeQuery = true, value = "select exists (select 1 from budgets where category_id = :categoryId"
+			+ " and not (owner_type = 'USER' and owner_id = :userId))")
+	boolean existsOthersOnCategory(UUID categoryId, UUID userId);
+
+	/**
+	 * A merged category's budgets move to the category it was merged into, unless the owner
+	 * already has one there for that month; those are dropped.
+	 */
+	@Modifying(flushAutomatically = true)
+	@Query(nativeQuery = true, value = "update budgets b set category_id = :into where category_id = :from"
+			+ " and not exists (select 1 from budgets o where o.owner_type = b.owner_type"
+			+ " and o.owner_id = b.owner_id and o.category_id = :into and o.period = b.period)")
+	int moveCategory(UUID from, UUID into);
+
+	@Modifying(flushAutomatically = true)
+	@Query(nativeQuery = true, value = "delete from budgets where category_id = :categoryId")
+	int deleteByCategory(UUID categoryId);
+
 	/**
 	 * A deleted family's budgets become its last member's private ones. Their categories
 	 * were the family's too and move the same way, so the unique key can't collide.

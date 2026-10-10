@@ -243,7 +243,7 @@ public class TransactionService {
 			}
 		}
 		Map<UUID, AccountRef> accounts = this.accountService.refs(userId, accountIds);
-		Map<UUID, CategoryView> categories = this.categoryService.views(categoryIds);
+		Map<UUID, CategoryView> categories = this.categoryService.viewsFor(userId, categoryIds);
 		return entities.stream().map((entity) -> toView(userId, entity, accounts, categories)).toList();
 	}
 

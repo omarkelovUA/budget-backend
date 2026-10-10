@@ -211,10 +211,33 @@ access to the account(s) a transaction touches:
 
 Other ownership rules:
 
-- A category's or budget's visibility (private/shared) is fixed at creation
-  (`409 visibility-immutable`), since flipping it would silently change who sees its
-  history. A category's income/expense type is fixed too, because it determines what past
-  payments did to balances.
+- A budget's visibility (private/shared) is fixed at creation, and so is a category's
+  in a `PUT` (`409 visibility-immutable`). A category's income/expense type is fixed too,
+  because it determines what past payments did to balances.
+- **Family categories** (M22) are shared by every member, live (no copies):
+  - Only the admin updates, deletes or hides one (`403 admin-required`); every member
+    records payments and sets budgets on it.
+  - Any member adds one: created as `shared`, or their own made one with
+    `POST /categories/{id}/share`. A non-admin's addition is live at once and recorded in
+    `added_by`; the admin reads `GET /categories/added-by-members` (the app shows a
+    message) and clears it with `POST /categories/added-by-members/seen`.
+  - `POST /categories/{id}/hide` (admin) makes it the admin's personal category. The
+    category module publishes `CategoryHiding` first; the transaction and budget modules
+    refuse with `409 category-used-by-family` while anyone else has payments or budgets
+    in it.
+  - **No duplicates:** a user never sees two categories with the same type and name
+    (case-insensitive): creating or renaming into one is refused (`409 category-exists`),
+    and a member's personal namesake of a family category is merged into it
+    (`CategoryMerged`: the transaction and budget modules repoint their rows, a budget
+    that would collide is dropped, then the personal copy is deleted). Merging runs when
+    someone joins (`FamilyMembershipStarted`), a category is shared, and a family category
+    is renamed.
+  - Someone else's personal category, seen through a payment on a shared account, comes
+    back as `{id, type, unknown: true}` with empty name, icon and colour.
+  - The admin reviews once which categories the family sees, when its first other member
+    arrives: `FamilyView.categoriesReviewed`, set by
+    `POST /families/current/categories-reviewed` (V20 set it for families that already
+    had members).
 - Creating something `shared` without a family fails with `409 no-family`. Since M19
   every user has a family, so this is only a guard.
 - Categories that are still referenced (transactions, budgets) can't be deleted
@@ -299,10 +322,11 @@ user's current family (one source of truth, nothing to keep in sync). Other modu
   "Родина" for Ukrainian, with the user as its only member and admin. V18 gave one to
   every existing user without a family. There's no endpoint to create a family.
 - **Starting data** (M21): `UserRegistered` also gives the user two accounts (Cash,
-  Card) in their default currency with a zero balance, and eight private categories (six
-  expense, two income), named in the sign-up language. The account and category modules
-  create them (`DefaultAccountSetup`, `DefaultCategorySetup`); they're ordinary data the
-  user edits or deletes.
+  Card) in their default currency with a zero balance, and eight family categories (six
+  expense, two income; shared by default, M22), named in the sign-up language. The
+  account and category modules create them (`DefaultAccountSetup`, `DefaultCategorySetup`,
+  ordered after `DefaultFamilySetup`); they're ordinary data the user edits, hides or
+  deletes.
 - **Rename:** admins rename it (`PATCH /families/current {name}`).
 - **Leaving** (`POST /families/current/leave`) and **being removed**
   (`DELETE /families/current/members/{id}`) put the user in a new family of their own,
@@ -477,6 +501,7 @@ Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `invalid-invite`, `already-invited`, `already-member`, `family-full`, `admin-required`, `last-admin`, `cannot-remove-self`, `no-family`,
 `alone-in-family`, `not-alone`, `user-not-found`, `already-requested`, `invalid-join-request`,
 `visibility-immutable`, `category-type-immutable`, `account-in-use`, `category-in-use`,
+`category-exists`, `category-used-by-family`,
 `invalid-transaction`, `currency-mismatch`, `transaction-not-editable`,
 `category-not-shared`, `budget-exists`, `not-account-owner`, `account-read-only`,
 `account-closed`, `grantee-not-in-family`, `close-target-required`, `invalid-currency`,

@@ -43,6 +43,28 @@ class CategoryController {
 		return this.categoryService.update(userId, id, request);
 	}
 
+	@PostMapping("/{id}/share")
+	CategoryView share(@CurrentUserId UUID userId, @PathVariable UUID id) {
+		return this.categoryService.share(userId, id);
+	}
+
+	@PostMapping("/{id}/hide")
+	CategoryView hide(@CurrentUserId UUID userId, @PathVariable UUID id) {
+		return this.categoryService.hide(userId, id);
+	}
+
+	/** Admin only: family categories other members added that the admin hasn't seen yet. */
+	@GetMapping("/added-by-members")
+	List<AddedCategoryView> addedByMembers(@CurrentUserId UUID userId) {
+		return this.categoryService.addedByMembers(userId);
+	}
+
+	@PostMapping("/added-by-members/seen")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void markAddedSeen(@CurrentUserId UUID userId) {
+		this.categoryService.markAddedSeen(userId);
+	}
+
 	@DeleteMapping("/{id}")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void delete(@CurrentUserId UUID userId, @PathVariable UUID id) {

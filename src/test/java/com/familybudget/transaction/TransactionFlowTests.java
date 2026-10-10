@@ -35,6 +35,7 @@ class TransactionFlowTests {
 	@Test
 	void paymentsMoveTheBalanceByCategoryType() {
 		Session alice = TestUsers.register(this.mvc);
+		this.api.clearDefaults(alice);
 		UUID card = this.api.account(alice, "Card", "100");
 		UUID food = this.api.category(alice, "expense", "Food", "private");
 		UUID salary = this.api.category(alice, "income", "Salary", "private");
@@ -203,6 +204,7 @@ class TransactionFlowTests {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
+		this.api.clearDefaults(alice);
 		UUID alicesCard = this.api.account(alice, "Alice card", "1000");
 		UUID cash = this.api.account(alice, "Family cash", "1000", shared(bob));
 		UUID dollars = TestApi.id(this.api.createAccount(alice, "USD", "1000", "USD", visible(bob)));

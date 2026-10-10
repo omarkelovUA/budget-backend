@@ -22,12 +22,14 @@ interface CategoryRepository extends JpaRepository<CategoryEntity, UUID> {
 
 	List<CategoryEntity> findByIdIn(Collection<UUID> ids);
 
+	List<CategoryEntity> findByOwnerTypeAndOwnerIdIn(OwnerType ownerType, Collection<UUID> ownerIds);
+
 	Optional<CategoryEntity> findFirstByOwnerTypeAndOwnerIdAndTypeAndName(OwnerType ownerType, UUID ownerId,
 			CategoryType type, String name);
 
 	/** A deleted family's categories become its last member's private ones. */
 	@Modifying(flushAutomatically = true)
-	@Query(nativeQuery = true, value = "update categories set owner_type = 'USER', owner_id = :userId"
+	@Query(nativeQuery = true, value = "update categories set owner_type = 'USER', owner_id = :userId, added_by = null"
 			+ " where owner_type = 'FAMILY' and owner_id = :familyId")
 	int transferFamilyCategories(UUID familyId, UUID userId);
 

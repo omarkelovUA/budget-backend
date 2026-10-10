@@ -71,6 +71,15 @@ public class FamilyService {
 			.collect(Collectors.toSet());
 	}
 
+	public boolean isAdmin(UUID userId) {
+		return this.members.findById(userId).map((member) -> member.getRole() == FamilyRole.ADMIN).orElse(false);
+	}
+
+	/** The caller's family id, refused unless they're its admin. */
+	public UUID requireAdminOf(UUID userId) {
+		return requireAdmin(userId).getFamilyId();
+	}
+
 	public AccessScope scopeFor(UUID userId) {
 		return new AccessScope(userId, currentFamilyId(userId).orElse(null));
 	}
@@ -97,6 +106,15 @@ public class FamilyService {
 			.orElseThrow(() -> new NotFoundException("Family not found"))
 			.rename(name.strip());
 		return view(familyId);
+	}
+
+	/** The one-time category review is done (or skipped); it isn't offered again. */
+	@Transactional
+	public void markCategoriesReviewed(UUID userId) {
+		UUID familyId = requireAdmin(userId).getFamilyId();
+		this.families.findById(familyId)
+			.orElseThrow(() -> new NotFoundException("Family not found"))
+			.markCategoriesReviewed();
 	}
 
 	@Transactional
@@ -463,7 +481,7 @@ public class FamilyService {
 			return new FamilyView.Member(member.getUserId(), user.email(), user.displayName(), member.getRole(),
 					member.getJoinedAt());
 		}).toList();
-		return new FamilyView(familyId, family.getName(), memberViews);
+		return new FamilyView(familyId, family.getName(), memberViews, family.categoriesReviewed());
 	}
 
 	private static InvitationView invitationView(FamilyInvitationEntity invitation) {
