@@ -162,8 +162,8 @@ with others and hidden from the rest. The API reports the caller's level as `acc
 - Only the owner edits an account, changes its grants, closes or deletes it
   (`403 not-account-owner`). Grants can change at any time.
 - Grants only go to other current members of the owner's family
-  (`409 grantee-not-in-family`, `409 no-family` without one). When a user stops being a
-  member (leaves, is removed, or moves family through an invitation), the family module
+  (`409 grantee-not-in-family`). When a user stops being a member (leaves, is removed,
+  or moves family through an invitation or join request), the family module
   publishes `FamilyMembershipEnded`. The account module then deletes every grant the user
   gives or holds, synchronously in the same database transaction. The accounts stay with
   their owner.
@@ -215,12 +215,13 @@ Other ownership rules:
   (`409 visibility-immutable`), since flipping it would silently change who sees its
   history. A category's income/expense type is fixed too, because it determines what past
   payments did to balances.
-- Creating something `shared` without a family fails with `409 no-family`.
+- Creating something `shared` without a family fails with `409 no-family`. Since M19
+  every user has a family, so this is only a guard.
 - Categories that are still referenced (transactions, budgets) can't be deleted
   (`409 category-in-use`), enforced by foreign keys.
 - A category's or budget's `owner_id` has no foreign key (it points at users *or*
-  families). When a family is deleted (its last member leaves, directly or by accepting
-  an invitation elsewhere), the family module publishes `FamilyDeleted`. The category
+  families). When a family is deleted (its last member moves to another family through
+  an invitation or join request), the family module publishes `FamilyDeleted`. The category
   and budget modules then turn that family's categories and budgets into the last
   member's private ones, synchronously in the same database transaction. They can't
   simply be dropped, because transactions still reference the categories, and the last
@@ -288,11 +289,21 @@ category's payments in that month, computed on every read (indexed on
 a **shared** budget counts every member's. A shared budget must use a shared category, so
 every member can see what it tracks.
 
-A user belongs to at most one family in v1. There is no `activeFamilyId` column on the
-user: `family_members` is keyed by `user_id`, so the membership row *is* the user's
-current family (one source of truth, nothing to keep in sync). Other modules ask
-`FamilyService.currentFamilyId(userId)`. Users who don't belong to a family only ever see
-private data.
+Every user belongs to exactly one family in v1 (M19). There is no `activeFamilyId`
+column on the user: `family_members` is keyed by `user_id`, so the membership row *is* the
+user's current family (one source of truth, nothing to keep in sync). Other modules ask
+`FamilyService.currentFamilyId(userId)`.
+
+- **Own family:** sign-up (password or Google) publishes `UserRegistered`, and the family
+  module creates the user's own family in the same transaction: named "Family", or
+  "Родина" for Ukrainian, with the user as its only member and admin. V18 gave one to
+  every existing user without a family. There's no endpoint to create a family.
+- **Rename:** admins rename it (`PATCH /families/current {name}`).
+- **Leaving** (`POST /families/current/leave`) and **being removed**
+  (`DELETE /families/current/members/{id}`) put the user in a new family of their own,
+  with the default name; leave returns it. Leaving while alone is refused
+  (`409 alone-in-family`). If the only admin leaves, the longest-standing remaining
+  member becomes admin. Demoting the last admin is still refused (`409 last-admin`).
 
 **Invitations** are keyed by email. An admin invites an address (it doesn't need an
 account yet); the invitation shows up for whoever signs in with that email
@@ -304,8 +315,7 @@ mobile clients list pending invitations themselves.
   practice that means the account is linked to Google.
 - Accepting moves the user: they leave their current family first. If they were its last
   member, that family is deleted; if they were its only admin, the longest-standing
-  remaining member becomes admin. (Leaving explicitly still requires promoting someone
-  first, `409 last-admin`.)
+  remaining member becomes admin.
 - A family has at most **10 seats**: members plus pending invitations. Inviting fails with
   `409 family-full`; revoking a pending invitation frees its seat. Invites and accepts
   lock the family row, so concurrent ones can't overshoot the limit.
@@ -313,6 +323,25 @@ mobile clients list pending invitations themselves.
   member fails with `409 already-member`. Declined, revoked and accepted invitations are
   kept with their status for history. Multi-family-per-user is listed as a v2 idea, not built now (§7); it would bring
 back an explicit active-family choice.
+
+**Join requests** (M19) go the other way: a user alone in their family asks to join the
+family of someone they name by email (`POST /join-requests {email}`), and that family's
+admins answer (`GET /families/current/join-requests`, `POST …/{id}/approve`,
+`POST …/{id}/decline`).
+
+- Asking needs a verified email (`403 email-not-verified`): the admins decide by the
+  requester's name and email. It also needs the requester to be alone (`409 not-alone`),
+  the email to belong to a user (`404 user-not-found`) in another family
+  (`409 already-member`).
+- One open request per requester, valid 7 days (`409 already-requested`). The requester
+  sees it at `GET /join-requests/mine` (`204` when there is none) and cancels it with
+  `DELETE /join-requests/mine`. Answered, cancelled or expired requests give
+  `404 invalid-join-request`.
+- Approving moves the requester in as a member, like accepting an invitation (their
+  one-person family is deleted, `FamilyMembershipStarted` is published). Requests don't
+  reserve a seat, so approving checks the limit (`409 family-full`).
+- When someone joins a family, open requests made by its members are closed: they asked
+  while alone, which they no longer are.
 
 ### 3.3 Relationship to current frontend types
 
@@ -334,7 +363,7 @@ repository contracts stayed as they were:
 - Creating/updating a budget sends `categoryId`, not an embedded category.
 - `GET /transactions` returns a page wrapper (§5.3), not a bare array.
 - The current user (`GET /users/me`) has no `familyId`; the family comes from
-  `GET /families/current` (404 when there is none).
+  `GET /families/current` (every user has one since M19).
 
 ## 4. Client contract
 
@@ -385,7 +414,7 @@ com.familybudget
   common/            # ProblemDetail error handling, pagination, auditing base entity
   security/          # JWT filter, OAuth2 success handler, JWT issuing/validation, roles
   user/              # User entity, registration, profile
-  family/            # Family, FamilyMembership, email invitations
+  family/            # Family, FamilyMembership, email invitations, join requests
   account/
   category/
   transaction/
@@ -413,7 +442,7 @@ is declared an *open* module since every feature uses it.
 
 - Base path `/api/v1`, resource-oriented REST. Full-object updates use `PUT` (the
   frontend's repositories send whole objects); `PATCH` is used only for genuinely partial
-  changes (a family member's role).
+  changes (a family member's role, the family's name).
   Decided in M7: `/api/v1` is written directly into each `@RequestMapping`. Spring
   Framework 7's API versioning would need a `{version}` segment in every mapping anyway and
   buys nothing until a `v2` exists; the URL shape is the same either way.
@@ -439,8 +468,9 @@ The frontend maps problem types to user-facing messages (§4), so this shape has
 stable.
 
 Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
-`invalid-refresh-token`, `email-not-verified`, `unauthenticated`, `already-in-family`,
+`invalid-refresh-token`, `email-not-verified`, `unauthenticated`,
 `invalid-invite`, `already-invited`, `already-member`, `family-full`, `admin-required`, `last-admin`, `cannot-remove-self`, `no-family`,
+`alone-in-family`, `not-alone`, `user-not-found`, `already-requested`, `invalid-join-request`,
 `visibility-immutable`, `category-type-immutable`, `account-in-use`, `category-in-use`,
 `invalid-transaction`, `currency-mismatch`, `transaction-not-editable`,
 `category-not-shared`, `budget-exists`, `not-account-owner`, `account-read-only`,
@@ -547,12 +577,14 @@ only changes those two beans.
   leak cross-family data.
 - Mutating an account requires being its owner; recording on it requires ownership or
   `SHARED` (§3.2). Mutating a `FAMILY`-owned category or budget checks the caller is a
-  member (any role) of that family; family-management actions (invite, remove member, change role)
-  require `ADMIN`.
-- A family always keeps at least one `ADMIN`: the last admin can't leave or be demoted
-  while other members remain. The last member leaving deletes the family.
-- Email invitations can only be used by an account whose email is verified (Google-linked),
-  since the email is the only thing tying an invitation to a person (§3.2).
+  member (any role) of that family; family-management actions (rename, invite, remove
+  member, change role, answer join requests) require `ADMIN`.
+- A family always keeps at least one `ADMIN`: the last admin can't be demoted, and if
+  they leave, the longest-standing member takes over. A family is deleted only when its
+  last member moves to another one.
+- Email invitations and join requests can only be used by an account whose email is
+  verified (Google-linked), since the email is the only thing tying them to a person
+  (§3.2).
 
 ### 6.4 Transport/infra
 

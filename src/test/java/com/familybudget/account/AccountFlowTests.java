@@ -139,7 +139,7 @@ class AccountFlowTests {
 		assertProblem(this.api.createAccount(alice, "Joint", "0", "UAH", visible(alice)), HttpStatus.CONFLICT,
 				"grantee-not-in-family");
 		assertProblem(this.api.createAccount(loner, "Joint", "0", "UAH", shared(alice)), HttpStatus.CONFLICT,
-				"no-family");
+				"grantee-not-in-family");
 		assertThat(this.api.createAccount(loner, "Private", "0", "UAH")).hasStatus(HttpStatus.CREATED);
 	}
 
@@ -152,7 +152,7 @@ class AccountFlowTests {
 		UUID joint = this.api.account(alice, "Joint", "500", shared(bob), shared(carol));
 		UUID bobsCard = this.api.account(bob, "Bob card", "100", visible(alice));
 
-		assertThat(this.api.postEmpty(bob, "/api/v1/families/current/leave")).hasStatus(HttpStatus.NO_CONTENT);
+		assertThat(this.api.postEmpty(bob, "/api/v1/families/current/leave")).hasStatusOk();
 
 		assertThat(this.api.get(bob, "/api/v1/accounts/{id}", joint)).hasStatus(HttpStatus.NOT_FOUND);
 		assertThat(this.api.get(alice, "/api/v1/accounts/{id}", bobsCard)).hasStatus(HttpStatus.NOT_FOUND);
@@ -172,9 +172,6 @@ class AccountFlowTests {
 		Session bob = TestUsers.register(this.mvc);
 		Session other = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
-		this.api.post(other, "/api/v1/families", """
-				{"name": "Others"}
-				""");
 		UUID joint = this.api.account(alice, "Joint", "500", shared(bob));
 
 		assertThat(this.api.join(other, bob)).hasStatusOk();

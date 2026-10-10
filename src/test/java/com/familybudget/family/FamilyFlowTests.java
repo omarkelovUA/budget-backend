@@ -19,7 +19,7 @@ import com.familybudget.TestApi;
 import com.familybudget.TestUsers;
 import com.familybudget.TestUsers.Session;
 
-/** Family creation, email invitations and admin-only management (ARCHITECTURE.md §3.2, §6.3). */
+/** Own families, email invitations and admin-only management (ARCHITECTURE.md §3.2, §6.3). */
 @IntegrationTest
 class FamilyFlowTests {
 
@@ -37,22 +37,38 @@ class FamilyFlowTests {
 	}
 
 	@Test
-	void creatorBecomesAdminAndCanOnlyBeInOneFamily() {
+	void signUpCreatesAFamilyOfOneNamedInTheUsersLanguage() {
 		Session alice = TestUsers.register(this.mvc);
+		Session olena = TestUsers.registerIn(this.mvc, "uk-UA");
 
-		MvcTestResult created = createFamily(alice, "Smiths");
-		assertThat(created).hasStatus(HttpStatus.CREATED);
-		assertThat(created).bodyJson().extractingPath("$.name").isEqualTo("Smiths");
-		assertThat(created).bodyJson().extractingPath("$.members[0].role").isEqualTo("admin");
-
-		assertProblem(createFamily(alice, "Second"), HttpStatus.CONFLICT, "already-in-family");
+		MvcTestResult own = this.api.get(alice, "/api/v1/families/current");
+		assertThat(own).hasStatusOk();
+		assertThat(own).bodyJson().extractingPath("$.name").isEqualTo("Family");
+		assertThat(own).bodyJson().extractingPath("$.members.length()").isEqualTo(1);
+		assertThat(own).bodyJson().extractingPath("$.members[0].role").isEqualTo("admin");
+		assertThat(this.api.get(olena, "/api/v1/families/current")).bodyJson()
+			.extractingPath("$.name")
+			.isEqualTo("Родина");
+		// Families can't be created any more: everyone already has one.
+		assertThat(this.api.post(alice, "/api/v1/families", """
+				{"name": "Second"}
+				""")).hasStatus(HttpStatus.NOT_FOUND);
 	}
 
 	@Test
-	void userWithoutFamilyGetsNotFound() {
-		Session loner = TestUsers.register(this.mvc);
+	void onlyAdminsRenameTheFamily() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		this.api.family(alice, bob);
 
-		assertThat(this.api.get(loner, "/api/v1/families/current")).hasStatus(HttpStatus.NOT_FOUND);
+		MvcTestResult renamed = rename(alice, "  Smiths ");
+		assertThat(renamed).hasStatusOk();
+		assertThat(renamed).bodyJson().extractingPath("$.name").isEqualTo("Smiths");
+		assertProblem(rename(bob, "Bobs"), HttpStatus.FORBIDDEN, "admin-required");
+		assertThat(rename(alice, " ")).hasStatus(HttpStatus.BAD_REQUEST);
+		assertThat(this.api.get(bob, "/api/v1/families/current")).bodyJson()
+			.extractingPath("$.name")
+			.isEqualTo("Smiths");
 	}
 
 	@Test
@@ -60,7 +76,7 @@ class FamilyFlowTests {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = verified(TestUsers.register(this.mvc));
 		Session carol = verified(TestUsers.register(this.mvc));
-		createFamily(alice, "Smiths");
+		rename(alice, "Smiths");
 
 		MvcTestResult invited = this.api.invite(alice, bob.email().toUpperCase());
 		UUID invitationId = TestApi.id(invited);
@@ -94,7 +110,7 @@ class FamilyFlowTests {
 	@Test
 	void anEmailCanBeInvitedBeforeItHasAnAccount() {
 		Session alice = TestUsers.register(this.mvc);
-		createFamily(alice, "Smiths");
+		rename(alice, "Smiths");
 		String email = TestUsers.uniqueEmail();
 
 		assertThat(this.api.invite(alice, email)).hasStatus(HttpStatus.CREATED);
@@ -109,7 +125,7 @@ class FamilyFlowTests {
 	void invitationsNeedAnEmailVerifiedByGoogle() {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
-		createFamily(alice, "Smiths");
+		rename(alice, "Smiths");
 		UUID invitationId = TestApi.id(this.api.invite(alice, bob.email()));
 
 		assertProblem(this.api.get(bob, "/api/v1/invitations"), HttpStatus.FORBIDDEN, "email-not-verified");
@@ -122,7 +138,7 @@ class FamilyFlowTests {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
 		Session carol = TestUsers.register(this.mvc);
-		createFamily(alice, "Smiths");
+		rename(alice, "Smiths");
 		this.api.family(bob, carol);
 
 		assertThat(this.api.join(alice, bob)).hasStatusOk();
@@ -139,8 +155,8 @@ class FamilyFlowTests {
 	void acceptingAsTheLastMemberDeletesTheOldFamily() {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
-		createFamily(alice, "Smiths");
-		UUID soloId = TestApi.id(createFamily(bob, "Solo"));
+		rename(alice, "Smiths");
+		UUID soloId = this.api.familyId(bob);
 
 		assertThat(this.api.join(alice, bob)).hasStatusOk();
 
@@ -152,7 +168,7 @@ class FamilyFlowTests {
 	void duplicateInvitationsAndInvitingMembersAreRejected() {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
-		createFamily(alice, "Smiths");
+		rename(alice, "Smiths");
 
 		assertThat(this.api.invite(alice, bob.email())).hasStatus(HttpStatus.CREATED);
 		assertProblem(this.api.invite(alice, bob.email()), HttpStatus.CONFLICT, "already-invited");
@@ -190,7 +206,7 @@ class FamilyFlowTests {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = verified(TestUsers.register(this.mvc));
 		Session carol = verified(TestUsers.register(this.mvc));
-		createFamily(alice, "Smiths");
+		rename(alice, "Smiths");
 		UUID bobsInvitation = TestApi.id(this.api.invite(alice, bob.email()));
 		UUID carolsInvitation = TestApi.id(this.api.invite(alice, carol.email()));
 
@@ -223,40 +239,55 @@ class FamilyFlowTests {
 	}
 
 	@Test
-	void lastAdminMustPromoteSomeoneBeforeLeaving() {
+	void leavingGivesTheUserAFamilyOfTheirOwn() {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
+		rename(alice, "Smiths");
 
-		assertProblem(this.api.postEmpty(alice, "/api/v1/families/current/leave"), HttpStatus.CONFLICT, "last-admin");
-
-		assertThat(this.mvc.patch()
-			.uri("/api/v1/families/current/members/{id}", bob.userId())
-			.header("Authorization", alice.bearer())
-			.contentType("application/json")
-			.content("""
-					{"role": "admin"}
-					""")).hasStatusOk();
-		assertThat(this.api.postEmpty(alice, "/api/v1/families/current/leave")).hasStatus(HttpStatus.NO_CONTENT);
-		assertThat(this.api.get(bob, "/api/v1/families/current")).bodyJson()
+		MvcTestResult left = this.api.postEmpty(bob, "/api/v1/families/current/leave");
+		assertThat(left).hasStatusOk();
+		assertThat(left).bodyJson().extractingPath("$.name").isEqualTo("Family");
+		assertThat(left).bodyJson().extractingPath("$.members.length()").isEqualTo(1);
+		assertThat(left).bodyJson().extractingPath("$.members[0].role").isEqualTo("admin");
+		assertThat(this.api.get(alice, "/api/v1/families/current")).bodyJson()
 			.extractingPath("$.members.length()")
 			.isEqualTo(1);
+
+		// Alone, there's nothing to leave.
+		assertProblem(this.api.postEmpty(bob, "/api/v1/families/current/leave"), HttpStatus.CONFLICT,
+				"alone-in-family");
 	}
 
 	@Test
-	void lastMemberLeavingDeletesTheFamily() {
-		Session alice = TestUsers.register(this.mvc);
-		createFamily(alice, "Solo");
-
-		assertThat(this.api.postEmpty(alice, "/api/v1/families/current/leave")).hasStatus(HttpStatus.NO_CONTENT);
-		assertThat(this.api.get(alice, "/api/v1/families/current")).hasStatus(HttpStatus.NOT_FOUND);
-		assertThat(createFamily(alice, "Fresh start")).hasStatus(HttpStatus.CREATED);
-	}
-
-	@Test
-	void theLastMemberLeavingKeepsTheFamilysCategoriesAndBudgetsAsPrivate() {
+	void theOnlyAdminLeavingHandsOverToTheLongestStandingMember() {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
+		Session carol = TestUsers.register(this.mvc);
+		this.api.family(alice, bob, carol);
+
+		assertThat(this.api.postEmpty(alice, "/api/v1/families/current/leave")).hasStatusOk();
+
+		MvcTestResult family = this.api.get(bob, "/api/v1/families/current");
+		assertThat(family).bodyJson().extractingPath("$.members[0].userId").isEqualTo(bob.userId().toString());
+		assertThat(family).bodyJson().extractingPath("$.members[0].role").isEqualTo("admin");
+		assertThat(family).bodyJson().extractingPath("$.members[1].role").isEqualTo("member");
+		// Demoting the last admin is still refused.
+		assertProblem(this.mvc.patch()
+			.uri("/api/v1/families/current/members/{id}", bob.userId())
+			.header("Authorization", bob.bearer())
+			.contentType("application/json")
+			.content("""
+					{"role": "member"}
+					""")
+			.exchange(), HttpStatus.CONFLICT, "last-admin");
+	}
+
+	@Test
+	void theLastMemberMovingOutKeepsTheFamilysCategoriesAndBudgetsAsPrivate() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		Session carol = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
 		UUID food = this.api.category(alice, "expense", "Food", "shared");
 		UUID card = this.api.account(alice, "Card", "100");
@@ -266,12 +297,12 @@ class FamilyFlowTests {
 				""".formatted(food))).hasStatus(HttpStatus.CREATED);
 
 		// Bob leaving doesn't delete the family, so nothing changes hands yet.
-		assertThat(this.api.postEmpty(bob, "/api/v1/families/current/leave")).hasStatus(HttpStatus.NO_CONTENT);
+		assertThat(this.api.postEmpty(bob, "/api/v1/families/current/leave")).hasStatusOk();
 		assertThat(this.api.get(alice, "/api/v1/categories")).bodyJson()
 			.extractingPath("$[0].visibility")
 			.isEqualTo("shared");
 
-		assertThat(this.api.postEmpty(alice, "/api/v1/families/current/leave")).hasStatus(HttpStatus.NO_CONTENT);
+		assertThat(this.api.join(carol, alice)).hasStatusOk();
 
 		assertThat(this.api.get(alice, "/api/v1/categories")).bodyJson()
 			.extractingPath("$[0].visibility")
@@ -286,8 +317,6 @@ class FamilyFlowTests {
 	void movingOutAsTheLastMemberKeepsTheOldFamilysCategories() {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
-		createFamily(alice, "Smiths");
-		createFamily(bob, "Solo");
 		this.api.category(bob, "expense", "Hobby", "shared");
 
 		assertThat(this.api.join(alice, bob)).hasStatusOk();
@@ -304,14 +333,16 @@ class FamilyFlowTests {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
 		Session stranger = TestUsers.register(this.mvc);
-		createFamily(stranger, "Joneses");
 		this.api.family(alice, bob);
 
 		assertThat(this.api.delete(alice, "/api/v1/families/current/members/{id}", stranger.userId()))
 			.hasStatus(HttpStatus.NOT_FOUND);
 		assertThat(this.api.delete(alice, "/api/v1/families/current/members/{id}", bob.userId()))
 			.hasStatus(HttpStatus.NO_CONTENT);
-		assertThat(this.api.get(bob, "/api/v1/families/current")).hasStatus(HttpStatus.NOT_FOUND);
+		// The removed member gets a family of their own.
+		MvcTestResult bobsFamily = this.api.get(bob, "/api/v1/families/current");
+		assertThat(bobsFamily).bodyJson().extractingPath("$.members.length()").isEqualTo(1);
+		assertThat(bobsFamily).bodyJson().extractingPath("$.members[0].role").isEqualTo("admin");
 	}
 
 	private Session verified(Session session) {
@@ -319,10 +350,15 @@ class FamilyFlowTests {
 		return session;
 	}
 
-	private MvcTestResult createFamily(Session session, String name) {
-		return this.api.post(session, "/api/v1/families", """
-				{"name": "%s"}
-				""".formatted(name));
+	private MvcTestResult rename(Session session, String name) {
+		return this.mvc.patch()
+			.uri("/api/v1/families/current")
+			.header("Authorization", session.bearer())
+			.contentType("application/json")
+			.content("""
+					{"name": "%s"}
+					""".formatted(name))
+			.exchange();
 	}
 
 	private MvcTestResult accept(Session session, UUID invitationId) {

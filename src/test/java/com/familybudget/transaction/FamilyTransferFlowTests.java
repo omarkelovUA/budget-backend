@@ -10,9 +10,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
@@ -42,7 +40,7 @@ class FamilyTransferFlowTests {
 	@Test
 	void joiningCreatesTransientAccountsBothWaysInEachSendersDefaultCurrency() {
 		Session alice = TestUsers.register(this.mvc);
-		Session bob = registerIn("pl-PL");
+		Session bob = TestUsers.registerIn(this.mvc, "pl-PL");
 		Session carol = TestUsers.register(this.mvc);
 		this.api.family(alice, bob, carol);
 
@@ -178,7 +176,7 @@ class FamilyTransferFlowTests {
 		send(alice, alicesCard, bob, "300");
 		send(bob, bobsCard, alice, "40");
 
-		assertThat(this.api.postEmpty(bob, "/api/v1/families/current/leave")).hasStatus(HttpStatus.NO_CONTENT);
+		assertThat(this.api.postEmpty(bob, "/api/v1/families/current/leave")).hasStatusOk();
 
 		String thisMonth = "/api/v1/transactions/summary?period=" + YearMonth.now();
 		assertThat(this.api.get(alice, thisMonth)).bodyJson().isLenientlyEqualTo("""
@@ -206,9 +204,6 @@ class FamilyTransferFlowTests {
 		Session bob = TestUsers.register(this.mvc);
 		Session carol = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
-		this.api.post(carol, "/api/v1/families", """
-				{"name": "Carol's"}
-				""");
 		UUID alicesCard = this.api.account(alice, "Alice card", "1000");
 		send(alice, alicesCard, bob, "300");
 
@@ -223,16 +218,6 @@ class FamilyTransferFlowTests {
 		assertThat(this.api.balance(alice, alicesCard)).isEqualByComparingTo("700.00");
 	}
 
-	private Session registerIn(String acceptLanguage) {
-		return Session.from(this.mvc.post()
-			.uri("/api/v1/auth/register")
-			.header(HttpHeaders.ACCEPT_LANGUAGE, acceptLanguage)
-			.contentType(MediaType.APPLICATION_JSON)
-			.content("""
-					{"email": "%s", "displayName": "Test User", "password": "%s"}
-					""".formatted(TestUsers.uniqueEmail(), TestUsers.PASSWORD))
-			.exchange());
-	}
 
 	/** Currencies of the open transient accounts from sender to recipient. */
 	private List<String> transients(Session sender, Session recipient) {

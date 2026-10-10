@@ -31,15 +31,14 @@ class FamilyController {
 		this.familyService = familyService;
 	}
 
-	@PostMapping
-	@ResponseStatus(HttpStatus.CREATED)
-	FamilyView create(@CurrentUserId UUID userId, @Valid @RequestBody CreateFamilyRequest request) {
-		return this.familyService.create(userId, request.name());
-	}
-
 	@GetMapping("/current")
 	FamilyView current(@CurrentUserId UUID userId) {
 		return this.familyService.current(userId);
+	}
+
+	@PatchMapping("/current")
+	FamilyView rename(@CurrentUserId UUID userId, @Valid @RequestBody RenameFamilyRequest request) {
+		return this.familyService.rename(userId, request.name());
 	}
 
 	@PostMapping("/current/invitations")
@@ -59,10 +58,10 @@ class FamilyController {
 		this.familyService.revokeInvitation(userId, invitationId);
 	}
 
+	/** Returns the caller's new family of their own. */
 	@PostMapping("/current/leave")
-	@ResponseStatus(HttpStatus.NO_CONTENT)
-	void leave(@CurrentUserId UUID userId) {
-		this.familyService.leave(userId);
+	FamilyView leave(@CurrentUserId UUID userId) {
+		return this.familyService.leave(userId);
 	}
 
 	@DeleteMapping("/current/members/{memberUserId}")
@@ -77,7 +76,23 @@ class FamilyController {
 		return this.familyService.changeRole(userId, memberUserId, request.role());
 	}
 
-	record CreateFamilyRequest(@NotBlank @Size(max = 100) String name) {
+	@GetMapping("/current/join-requests")
+	List<IncomingJoinRequestView> joinRequests(@CurrentUserId UUID userId) {
+		return this.familyService.incomingJoinRequests(userId);
+	}
+
+	@PostMapping("/current/join-requests/{requestId}/approve")
+	FamilyView approveJoinRequest(@CurrentUserId UUID userId, @PathVariable UUID requestId) {
+		return this.familyService.approveJoinRequest(userId, requestId);
+	}
+
+	@PostMapping("/current/join-requests/{requestId}/decline")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void declineJoinRequest(@CurrentUserId UUID userId, @PathVariable UUID requestId) {
+		this.familyService.declineJoinRequest(userId, requestId);
+	}
+
+	record RenameFamilyRequest(@NotBlank @Size(max = 100) String name) {
 	}
 
 	record InviteRequest(@NotBlank @Email @Size(max = 320) String email) {

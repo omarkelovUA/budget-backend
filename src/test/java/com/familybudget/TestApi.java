@@ -58,11 +58,8 @@ public final class TestApi {
 		return this.mvc.delete().uri(uri, vars).header(HttpHeaders.AUTHORIZATION, session.bearer()).exchange();
 	}
 
-	/** Creates a family owned by {@code admin} and joins every other session to it. */
+	/** Joins every other session to {@code admin}'s family (everyone signs up into their own). */
 	public void family(Session admin, Session... members) {
-		assertThat(post(admin, "/api/v1/families", """
-				{"name": "Family"}
-				""")).hasStatus(HttpStatus.CREATED);
 		for (Session member : members) {
 			assertThat(join(admin, member)).hasStatusOk();
 		}
@@ -73,6 +70,12 @@ public final class TestApi {
 		verifyEmail(member);
 		UUID invitationId = id(invite(admin, member.email()));
 		return postEmpty(member, "/api/v1/invitations/{id}/accept", invitationId);
+	}
+
+	public UUID familyId(Session session) {
+		MvcTestResult family = get(session, "/api/v1/families/current");
+		assertThat(family).hasStatusOk();
+		return UUID.fromString(TestUsers.json(family, "$.id"));
 	}
 
 	public MvcTestResult invite(Session admin, String email) {

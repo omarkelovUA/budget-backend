@@ -54,10 +54,10 @@ class FamilyMemberEntity {
 		this.role = role;
 	}
 
-	/** Accepting an invitation moves the membership row: one family per user. */
-	void moveTo(UUID familyId) {
+	/** Changing family moves the membership row: one family per user. */
+	void moveTo(UUID familyId, FamilyRole role) {
 		this.familyId = familyId;
-		this.role = FamilyRole.MEMBER;
+		this.role = role;
 		this.joinedAt = Instant.now();
 	}
 

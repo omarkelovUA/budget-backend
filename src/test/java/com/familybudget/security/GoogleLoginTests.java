@@ -127,6 +127,12 @@ class GoogleLoginTests {
 			.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)).bodyJson().isLenientlyEqualTo("""
 					{"language": "en", "defaultCurrency": "EUR", "usedCurrencies": ["EUR"], "theme": "system"}
 					""");
+		// Google sign-up gets its own family too, named in the user's language.
+		assertThat(this.mvc.get()
+			.uri("/api/v1/families/current")
+			.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)).bodyJson()
+			.extractingPath("$.name")
+			.isEqualTo("Family");
 	}
 
 	@Test

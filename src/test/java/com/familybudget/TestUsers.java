@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import com.jayway.jsonpath.JsonPath;
 import jakarta.servlet.http.Cookie;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
@@ -38,6 +39,18 @@ public final class TestUsers {
 			.exchange();
 		assertThat(result).hasStatus(HttpStatus.CREATED);
 		return Session.from(result);
+	}
+
+	/** Signs up from a browser whose language is {@code acceptLanguage}. */
+	public static Session registerIn(MockMvcTester mvc, String acceptLanguage) {
+		return Session.from(mvc.post()
+			.uri("/api/v1/auth/register")
+			.header(HttpHeaders.ACCEPT_LANGUAGE, acceptLanguage)
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+					{"email": "%s", "displayName": "Test User", "password": "%s"}
+					""".formatted(uniqueEmail(), PASSWORD))
+			.exchange());
 	}
 
 	public static String json(MvcTestResult result, String path) {

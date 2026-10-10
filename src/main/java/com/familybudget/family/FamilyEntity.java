@@ -49,4 +49,8 @@ class FamilyEntity {
 		return this.name;
 	}
 
+	void rename(String name) {
+		this.name = name;
+	}
+
 }

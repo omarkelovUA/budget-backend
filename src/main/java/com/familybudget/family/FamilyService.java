@@ -39,6 +39,8 @@ public class FamilyService {
 
 	private final FamilyInvitationRepository invitations;
 
+	private final FamilyJoinRequestRepository joinRequests;
+
 	private final UserService userService;
 
 	private final ApplicationEventPublisher events;
@@ -46,11 +48,12 @@ public class FamilyService {
 	private final Duration inviteTtl;
 
 	FamilyService(FamilyRepository families, FamilyMemberRepository members, FamilyInvitationRepository invitations,
-			UserService userService, ApplicationEventPublisher events,
+			FamilyJoinRequestRepository joinRequests, UserService userService, ApplicationEventPublisher events,
 			@Value("${app.family.invite-ttl}") Duration inviteTtl) {
 		this.families = families;
 		this.members = members;
 		this.invitations = invitations;
+		this.joinRequests = joinRequests;
 		this.userService = userService;
 		this.events = events;
 		this.inviteTtl = inviteTtl;
@@ -76,12 +79,24 @@ public class FamilyService {
 		return view(membership(userId).getFamilyId());
 	}
 
+	/** The default name of a user's own family, in their language. */
+	static String defaultName(String language) {
+		return "uk".equals(language) ? "Родина" : "Family";
+	}
+
+	/** A new user's own family, with them as its only member and admin. */
 	@Transactional
-	public FamilyView create(UUID userId, String name) {
-		requireNoFamily(userId);
-		FamilyEntity family = this.families.save(new FamilyEntity(name.strip(), userId));
-		this.members.save(new FamilyMemberEntity(userId, family.getId(), FamilyRole.ADMIN));
-		return view(family.getId());
+	void createOwnFamily(UUID userId, String language) {
+		this.members.save(new FamilyMemberEntity(userId, newFamily(userId, language), FamilyRole.ADMIN));
+	}
+
+	@Transactional
+	public FamilyView rename(UUID userId, String name) {
+		UUID familyId = requireAdmin(userId).getFamilyId();
+		this.families.findById(familyId)
+			.orElseThrow(() -> new NotFoundException("Family not found"))
+			.rename(name.strip());
+		return view(familyId);
 	}
 
 	@Transactional
@@ -155,7 +170,7 @@ public class FamilyService {
 	/**
 	 * Joins the inviting family. A user belongs to one family only, so the caller first
 	 * leaves their current one: as its last member that deletes it, as its only admin the
-	 * longest-standing remaining member becomes admin.
+	 * longest-standing remaining member becomes admin (see moveOut).
 	 */
 	@Transactional
 	public FamilyView accept(UUID userId, UUID invitationId) {
@@ -163,8 +178,8 @@ public class FamilyService {
 		Instant now = Instant.now();
 		UUID familyId = invitation.getFamilyId();
 		lockFamily(familyId);
-		Optional<FamilyMemberEntity> current = this.members.findById(userId);
-		if (current.isPresent() && current.get().getFamilyId().equals(familyId)) {
+		FamilyMemberEntity current = membership(userId);
+		if (current.getFamilyId().equals(familyId)) {
 			invitation.close(InvitationStatus.ACCEPTED, now);
 			return view(familyId);
 		}
@@ -172,15 +187,8 @@ public class FamilyService {
 		if (seatsTaken(familyId, now) > MAX_MEMBERS) {
 			throw familyFull();
 		}
-		if (current.isPresent()) {
-			moveToFamily(current.get(), familyId);
-		}
-		else {
-			this.members.save(new FamilyMemberEntity(userId, familyId, FamilyRole.MEMBER));
-		}
 		invitation.close(InvitationStatus.ACCEPTED, now);
-		this.members.flush();
-		this.events.publishEvent(new FamilyMembershipStarted(userId, familyId));
+		join(current, familyId);
 		return view(familyId);
 	}
 
@@ -189,31 +197,108 @@ public class FamilyService {
 		receivedInvitation(userId, invitationId).close(InvitationStatus.DECLINED, Instant.now());
 	}
 
-	/** Leaving as the last member deletes the family; the last admin must promote someone first. */
+	/**
+	 * Leaving puts the caller in a new family of their own (there's nothing to leave while
+	 * alone). As the only admin, the longest-standing remaining member takes over.
+	 */
 	@Transactional
-	public void leave(UUID userId) {
+	public FamilyView leave(UUID userId) {
 		FamilyMemberEntity member = membership(userId);
-		UUID familyId = member.getFamilyId();
-		List<FamilyMemberEntity> all = this.members.findByFamilyIdOrderByJoinedAt(familyId);
-		if (all.size() == 1) {
-			this.members.delete(member);
-			deleteFamily(familyId, userId);
+		if (this.members.countByFamilyId(member.getFamilyId()) == 1) {
+			throw new ApiException(HttpStatus.CONFLICT, "alone-in-family", "You are the only member of your family");
 		}
-		else {
-			requireNotLastAdmin(member);
-			this.members.delete(member);
-		}
-		membershipEnded(userId, familyId);
+		moveToOwnFamily(member);
+		return view(member.getFamilyId());
 	}
 
+	/** The removed member gets a new family of their own. */
 	@Transactional
 	public void removeMember(UUID userId, UUID memberUserId) {
 		FamilyMemberEntity admin = requireAdmin(userId);
 		if (userId.equals(memberUserId)) {
 			throw new ApiException(HttpStatus.CONFLICT, "cannot-remove-self", "Use leave to remove yourself");
 		}
-		this.members.delete(memberOfSameFamily(admin, memberUserId));
-		membershipEnded(memberUserId, admin.getFamilyId());
+		moveToOwnFamily(memberOfSameFamily(admin, memberUserId));
+	}
+
+	/**
+	 * Asks to join the family of the person with {@code email}. Only someone alone in their
+	 * family may ask, with a verified email: the admins decide by who's asking.
+	 */
+	@Transactional
+	public JoinRequestView requestToJoin(UUID userId, String email) {
+		requireVerifiedEmail(userId);
+		FamilyMemberEntity requester = membership(userId);
+		if (this.members.countByFamilyId(requester.getFamilyId()) > 1) {
+			throw new ApiException(HttpStatus.CONFLICT, "not-alone",
+					"Only someone alone in their family can ask to join another one");
+		}
+		String normalizedEmail = UserService.normalizeEmail(email);
+		UUID familyId = this.userService.findByEmail(normalizedEmail)
+			.flatMap((user) -> currentFamilyId(user.id()))
+			.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "user-not-found",
+					"Nobody has signed up with this email"));
+		if (familyId.equals(requester.getFamilyId())) {
+			throw new ApiException(HttpStatus.CONFLICT, "already-member", "You are already in this family");
+		}
+		Instant now = Instant.now();
+		Optional<FamilyJoinRequestEntity> previous = this.joinRequests.findByRequesterIdAndStatus(userId,
+				InvitationStatus.PENDING);
+		if (previous.isPresent()) {
+			if (previous.get().isOpen(now)) {
+				throw new ApiException(HttpStatus.CONFLICT, "already-requested",
+						"You already asked to join a family; cancel that request first");
+			}
+			previous.get().close(InvitationStatus.EXPIRED, now);
+			// Free the requester's slot of the partial unique index before inserting.
+			this.joinRequests.flush();
+		}
+		return joinRequestView(this.joinRequests
+			.save(new FamilyJoinRequestEntity(userId, familyId, normalizedEmail, now.plus(this.inviteTtl))));
+	}
+
+	public Optional<JoinRequestView> ownJoinRequest(UUID userId) {
+		return openOwnJoinRequest(userId).map(this::joinRequestView);
+	}
+
+	@Transactional
+	public void cancelJoinRequest(UUID userId) {
+		openOwnJoinRequest(userId).orElseThrow(FamilyService::invalidJoinRequest)
+			.close(InvitationStatus.REVOKED, Instant.now());
+	}
+
+	/** Open requests to join the caller's family; only its admins answer them. */
+	public List<IncomingJoinRequestView> incomingJoinRequests(UUID userId) {
+		UUID familyId = requireAdmin(userId).getFamilyId();
+		List<FamilyJoinRequestEntity> open = this.joinRequests
+			.findByFamilyIdAndStatusAndExpiresAtAfterOrderByCreatedAt(familyId, InvitationStatus.PENDING, Instant.now());
+		Map<UUID, UserView> requesters = usersById(open.stream().map(FamilyJoinRequestEntity::getRequesterId).toList());
+		return open.stream().map((request) -> {
+			UserView requester = requesters.get(request.getRequesterId());
+			return new IncomingJoinRequestView(request.getId(), requester.id(), requester.displayName(),
+					requester.email(), request.getCreatedAt(), request.getExpiresAt());
+		}).toList();
+	}
+
+	/** Moves the requester in as a member; their own one-person family is deleted. */
+	@Transactional
+	public FamilyView approveJoinRequest(UUID userId, UUID requestId) {
+		UUID familyId = requireAdmin(userId).getFamilyId();
+		lockFamily(familyId);
+		FamilyJoinRequestEntity request = incomingJoinRequest(familyId, requestId);
+		Instant now = Instant.now();
+		if (seatsTaken(familyId, now) >= MAX_MEMBERS) {
+			throw familyFull();
+		}
+		request.close(InvitationStatus.ACCEPTED, now);
+		join(membership(request.getRequesterId()), familyId);
+		return view(familyId);
+	}
+
+	@Transactional
+	public void declineJoinRequest(UUID userId, UUID requestId) {
+		UUID familyId = requireAdmin(userId).getFamilyId();
+		incomingJoinRequest(familyId, requestId).close(InvitationStatus.DECLINED, Instant.now());
 	}
 
 	@Transactional
@@ -227,7 +312,33 @@ public class FamilyService {
 		return view(admin.getFamilyId());
 	}
 
-	private void moveToFamily(FamilyMemberEntity member, UUID newFamilyId) {
+	/**
+	 * Moves a member into {@code familyId}. Requests to join other families that its members
+	 * made while alone are moot now.
+	 */
+	private void join(FamilyMemberEntity member, UUID familyId) {
+		moveOut(member, familyId, FamilyRole.MEMBER);
+		this.members.flush();
+		Instant now = Instant.now();
+		this.joinRequests.findByRequesterIdInAndStatus(memberIds(familyId), InvitationStatus.PENDING)
+			.forEach((request) -> request.close(InvitationStatus.REVOKED, now));
+		this.events.publishEvent(new FamilyMembershipStarted(member.getUserId(), familyId));
+	}
+
+	private void moveToOwnFamily(FamilyMemberEntity member) {
+		UUID userId = member.getUserId();
+		moveOut(member, newFamily(userId, this.userService.settings(userId).language()), FamilyRole.ADMIN);
+	}
+
+	private UUID newFamily(UUID userId, String language) {
+		return this.families.save(new FamilyEntity(defaultName(language), userId)).getId();
+	}
+
+	/**
+	 * Moves a member's row to {@code newFamilyId}. As the only admin, the longest-standing
+	 * remaining member takes over; as the last member, the old family is deleted.
+	 */
+	private void moveOut(FamilyMemberEntity member, UUID newFamilyId, FamilyRole role) {
 		UUID oldFamilyId = member.getFamilyId();
 		List<FamilyMemberEntity> others = this.members.findByFamilyIdOrderByJoinedAt(oldFamilyId)
 			.stream()
@@ -237,7 +348,7 @@ public class FamilyService {
 				&& others.stream().noneMatch((other) -> other.getRole() == FamilyRole.ADMIN)) {
 			others.getFirst().setRole(FamilyRole.ADMIN);
 		}
-		member.moveTo(newFamilyId);
+		member.moveTo(newFamilyId, role);
 		if (others.isEmpty()) {
 			// Move the membership row out before the family's delete cascades to its members.
 			this.members.flush();
@@ -253,6 +364,32 @@ public class FamilyService {
 
 	private void membershipEnded(UUID userId, UUID familyId) {
 		this.events.publishEvent(new FamilyMembershipEnded(userId, familyId));
+	}
+
+	private Optional<FamilyJoinRequestEntity> openOwnJoinRequest(UUID userId) {
+		Instant now = Instant.now();
+		return this.joinRequests.findByRequesterIdAndStatus(userId, InvitationStatus.PENDING)
+			.filter((request) -> request.isOpen(now));
+	}
+
+	private FamilyJoinRequestEntity incomingJoinRequest(UUID familyId, UUID requestId) {
+		Instant now = Instant.now();
+		return this.joinRequests.findById(requestId)
+			.filter((request) -> request.getFamilyId().equals(familyId) && request.isOpen(now))
+			.orElseThrow(FamilyService::invalidJoinRequest);
+	}
+
+	private static ApiException invalidJoinRequest() {
+		return new ApiException(HttpStatus.NOT_FOUND, "invalid-join-request",
+				"Join request is invalid, expired or already answered");
+	}
+
+	private JoinRequestView joinRequestView(FamilyJoinRequestEntity request) {
+		String familyName = this.families.findById(request.getFamilyId())
+			.map(FamilyEntity::getName)
+			.orElseThrow(() -> new NotFoundException("Family not found"));
+		return new JoinRequestView(request.getId(), request.getEmail(), familyName, request.getCreatedAt(),
+				request.getExpiresAt());
 	}
 
 	private FamilyInvitationEntity receivedInvitation(UUID userId, UUID invitationId) {
@@ -289,12 +426,6 @@ public class FamilyService {
 
 	private FamilyMemberEntity membership(UUID userId) {
 		return this.members.findById(userId).orElseThrow(() -> new NotFoundException("You are not in a family"));
-	}
-
-	private void requireNoFamily(UUID userId) {
-		if (this.members.existsById(userId)) {
-			throw new ApiException(HttpStatus.CONFLICT, "already-in-family", "You already belong to a family");
-		}
 	}
 
 	private FamilyMemberEntity requireAdmin(UUID userId) {

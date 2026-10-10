@@ -48,7 +48,7 @@ public class UserService {
 		}
 		UserEntity user = new UserEntity(normalizedEmail, displayName.strip(), region);
 		user.setPasswordHash(this.passwordEncoder.encode(rawPassword));
-		return this.users.save(user).toView();
+		return registered(this.users.save(user));
 	}
 
 	public Optional<UserView> authenticate(String email, String rawPassword) {
@@ -80,11 +80,17 @@ public class UserService {
 		UserEntity user = existing
 			.orElseGet(() -> new UserEntity(normalizedEmail, displayNameOrDefault(name, normalizedEmail), region));
 		user.linkGoogle(subject);
-		if (existing.isPresent()) {
-			user.reclaimForVerifiedOwner();
-			this.events.publishEvent(new UserSessionsInvalidated(user.getId()));
+		if (existing.isEmpty()) {
+			return registered(this.users.save(user));
 		}
+		user.reclaimForVerifiedOwner();
+		this.events.publishEvent(new UserSessionsInvalidated(user.getId()));
 		return this.users.save(user).toView();
+	}
+
+	private UserView registered(UserEntity user) {
+		this.events.publishEvent(new UserRegistered(user.getId(), user.settings().language()));
+		return user.toView();
 	}
 
 	public UserView get(UUID id) {
