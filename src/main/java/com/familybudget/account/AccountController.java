@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.UUID;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,6 +36,13 @@ class AccountController {
 		return this.accountService.list(userId, closed);
 	}
 
+	/** The caller's own order of the open accounts they see. */
+	@PutMapping("/order")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void reorder(@CurrentUserId UUID userId, @Valid @RequestBody OrderRequest request) {
+		this.accountService.reorder(userId, request.ids());
+	}
+
 	@GetMapping("/{id}")
 	AccountView get(@CurrentUserId UUID userId, @PathVariable UUID id) {
 		return this.accountService.get(userId, id);
@@ -54,6 +63,9 @@ class AccountController {
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void delete(@CurrentUserId UUID userId, @PathVariable UUID id) {
 		this.accountService.delete(userId, id);
+	}
+
+	record OrderRequest(@NotNull @Size(max = 500) List<@NotNull UUID> ids) {
 	}
 
 }

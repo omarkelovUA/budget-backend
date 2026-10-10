@@ -20,6 +20,7 @@ import com.familybudget.common.AccessScope;
 import com.familybudget.common.ApiException;
 import com.familybudget.common.NotFoundException;
 import com.familybudget.common.OwnerType;
+import com.familybudget.common.UserOrder;
 import com.familybudget.common.Visibility;
 import com.familybudget.family.FamilyService;
 import com.familybudget.user.UserService;
@@ -43,20 +44,36 @@ public class CategoryService {
 
 	private final ApplicationEventPublisher events;
 
+	private final UserOrder userOrder;
+
+	private static final UserOrder.Table POSITIONS = new UserOrder.Table("category_positions", "category_id");
+
 	CategoryService(CategoryRepository categories, FamilyService familyService, UserService userService,
-			ApplicationEventPublisher events) {
+			ApplicationEventPublisher events, UserOrder userOrder) {
 		this.categories = categories;
 		this.familyService = familyService;
 		this.userService = userService;
 		this.events = events;
+		this.userOrder = userOrder;
 	}
 
+	/** In the user's own order; new ones last, by type and name. */
 	public List<CategoryView> list(UUID userId) {
-		AccessScope scope = this.familyService.scopeFor(userId);
-		return this.categories.findVisible(scope.userId(), scope.familyId())
+		return this.userOrder.sort(POSITIONS, userId, visible(userId), CategoryEntity::getId)
 			.stream()
 			.map(CategoryEntity::toView)
 			.toList();
+	}
+
+	/** The user's own order of the categories they see. */
+	@Transactional
+	void reorder(UUID userId, List<UUID> ids) {
+		this.userOrder.replace(POSITIONS, userId, ids, visible(userId).stream().map(CategoryEntity::getId).toList());
+	}
+
+	private List<CategoryEntity> visible(UUID userId) {
+		AccessScope scope = this.familyService.scopeFor(userId);
+		return this.categories.findVisible(scope.userId(), scope.familyId());
 	}
 
 	/** A family category made by a member other than the admin is live at once; the admin is told. */

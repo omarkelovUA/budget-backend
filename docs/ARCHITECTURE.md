@@ -372,6 +372,14 @@ admins answer (`GET /families/current/join-requests`, `POST …/{id}/approve`,
 - When someone joins a family, open requests made by its members are closed: they asked
   while alone, which they no longer are.
 
+**Custom order** (M24): each user orders the open accounts and the categories they see,
+for themselves only. `PUT /accounts/order` and `PUT /categories/order` take the whole
+order (`{ids}`; duplicates `400 validation-failed`, ids the user can't see
+`404 not-found`) and replace the user's rows in `account_positions` /
+`category_positions`. The lists sort by them; items without a position (new ones, newly
+shared ones) come after, in the default order (accounts oldest first, categories by type
+and name). `common.UserOrder` reads, replaces and applies them for both modules.
+
 ### 3.3 Relationship to current frontend types
 
 The API follows the frontend's `model/types.ts` (as of M8) rather than the database

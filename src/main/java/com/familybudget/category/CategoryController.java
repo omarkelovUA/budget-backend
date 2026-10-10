@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.UUID;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -43,6 +45,13 @@ class CategoryController {
 		return this.categoryService.update(userId, id, request);
 	}
 
+	/** The caller's own order of the categories they see. */
+	@PutMapping("/order")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void reorder(@CurrentUserId UUID userId, @Valid @RequestBody OrderRequest request) {
+		this.categoryService.reorder(userId, request.ids());
+	}
+
 	@PostMapping("/{id}/share")
 	CategoryView share(@CurrentUserId UUID userId, @PathVariable UUID id) {
 		return this.categoryService.share(userId, id);
@@ -69,6 +78,9 @@ class CategoryController {
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void delete(@CurrentUserId UUID userId, @PathVariable UUID id) {
 		this.categoryService.delete(userId, id);
+	}
+
+	record OrderRequest(@NotNull @Size(max = 500) List<@NotNull UUID> ids) {
 	}
 
 }

@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.familybudget.common.ApiException;
 import com.familybudget.common.NotFoundException;
+import com.familybudget.common.UserOrder;
 import com.familybudget.family.FamilyService;
 import com.familybudget.user.UserService;
 import com.familybudget.user.UserView;
@@ -40,18 +41,33 @@ public class AccountService {
 
 	private final EntityManager entityManager;
 
+	private final UserOrder userOrder;
+
+	private static final UserOrder.Table POSITIONS = new UserOrder.Table("account_positions", "account_id");
+
 	AccountService(AccountRepository accounts, FamilyService familyService, UserService userService,
-			EntityManager entityManager) {
+			EntityManager entityManager, UserOrder userOrder) {
 		this.accounts = accounts;
 		this.familyService = familyService;
 		this.userService = userService;
 		this.entityManager = entityManager;
+		this.userOrder = userOrder;
 	}
 
-	/** Open accounts the user can see, or with {@code closed} their own closed ones. */
+	/**
+	 * Open accounts the user can see, in their own order (new ones last, oldest first), or
+	 * with {@code closed} their own closed ones, latest first.
+	 */
 	List<AccountView> list(UUID userId, boolean closed) {
-		return views(userId,
-				closed ? this.accounts.findClosedOwnedBy(userId) : this.accounts.findOpenViewable(userId));
+		return views(userId, closed ? this.accounts.findClosedOwnedBy(userId)
+				: this.userOrder.sort(POSITIONS, userId, this.accounts.findOpenViewable(userId), AccountEntity::getId));
+	}
+
+	/** The user's own order of the open accounts they see. */
+	@Transactional
+	void reorder(UUID userId, List<UUID> ids) {
+		this.userOrder.replace(POSITIONS, userId, ids,
+				this.accounts.findOpenViewable(userId).stream().map(AccountEntity::getId).toList());
 	}
 
 	public AccountView get(UUID userId, UUID id) {
