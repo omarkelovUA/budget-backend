@@ -48,6 +48,7 @@ class AccountFlowTests {
 	void eachMemberSeesWhatTheOwnerGrantedThem() {
 		Family f = family();
 		Session stranger = TestUsers.register(this.mvc);
+		this.api.clearDefaults(f.alice(), f.bob(), f.dave());
 		this.api.account(f.alice(), "Alice card", "100.50");
 		UUID joint = this.api.account(f.alice(), "Joint", "500", shared(f.bob()), visible(f.carol()));
 
@@ -184,6 +185,7 @@ class AccountFlowTests {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
+		this.api.clearDefaults(alice);
 		UUID card = this.api.account(alice, "Card", "100", shared(bob));
 		UUID savings = this.api.account(alice, "Savings", "10");
 		UUID dollars = TestApi.id(this.api.createAccount(alice, "USD", "0", "USD"));

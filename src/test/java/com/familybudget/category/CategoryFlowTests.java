@@ -33,6 +33,7 @@ class CategoryFlowTests {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
+		this.api.clearDefaults(alice, bob);
 		this.api.category(alice, "expense", "Hobby", "private");
 		this.api.category(alice, "expense", "Groceries", "shared");
 		this.api.category(alice, "income", "Salary", "shared");

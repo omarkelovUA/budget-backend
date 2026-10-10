@@ -43,6 +43,7 @@ class FamilyTransferFlowTests {
 		Session bob = TestUsers.registerIn(this.mvc, "pl-PL");
 		Session carol = TestUsers.register(this.mvc);
 		this.api.family(alice, bob, carol);
+		this.api.clearDefaults(alice);
 
 		assertThat(transients(alice, bob)).containsExactly("UAH");
 		assertThat(transients(bob, alice)).containsExactly("PLN");
@@ -171,6 +172,7 @@ class FamilyTransferFlowTests {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
+		this.api.clearDefaults(alice, bob);
 		UUID alicesCard = this.api.account(alice, "Alice card", "1000");
 		UUID bobsCard = this.api.account(bob, "Bob card", "1000");
 		send(alice, alicesCard, bob, "300");

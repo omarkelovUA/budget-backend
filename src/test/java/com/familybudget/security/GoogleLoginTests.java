@@ -133,6 +133,13 @@ class GoogleLoginTests {
 			.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)).bodyJson()
 			.extractingPath("$.name")
 			.isEqualTo("Family");
+		// And the starting accounts, in the region's currency.
+		assertThat(this.mvc.get()
+			.uri("/api/v1/accounts")
+			.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)).bodyJson()
+			.extractingPath("$[*].currency")
+			.asArray()
+			.containsExactly("EUR", "EUR");
 	}
 
 	@Test

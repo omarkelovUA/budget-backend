@@ -298,6 +298,11 @@ user's current family (one source of truth, nothing to keep in sync). Other modu
   module creates the user's own family in the same transaction: named "Family", or
   "Родина" for Ukrainian, with the user as its only member and admin. V18 gave one to
   every existing user without a family. There's no endpoint to create a family.
+- **Starting data** (M21): `UserRegistered` also gives the user two accounts (Cash,
+  Card) in their default currency with a zero balance, and eight private categories (six
+  expense, two income), named in the sign-up language. The account and category modules
+  create them (`DefaultAccountSetup`, `DefaultCategorySetup`); they're ordinary data the
+  user edits or deletes.
 - **Rename:** admins rename it (`PATCH /families/current {name}`).
 - **Leaving** (`POST /families/current/leave`) and **being removed**
   (`DELETE /families/current/members/{id}`) put the user in a new family of their own,

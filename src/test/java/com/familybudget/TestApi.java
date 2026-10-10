@@ -3,10 +3,13 @@ package com.familybudget;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.math.BigDecimal;
+import java.io.UnsupportedEncodingException;
 import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.jayway.jsonpath.JsonPath;
 import org.jspecify.annotations.Nullable;
 
 import org.springframework.http.HttpHeaders;
@@ -56,6 +59,31 @@ public final class TestApi {
 
 	public MvcTestResult delete(Session session, String uri, Object... vars) {
 		return this.mvc.delete().uri(uri, vars).header(HttpHeaders.AUTHORIZATION, session.bearer()).exchange();
+	}
+
+	/**
+	 * Deletes the accounts and categories every user starts with (DefaultAccountSetup,
+	 * DefaultCategorySetup), for tests that check exact lists.
+	 */
+	public void clearDefaults(Session... sessions) {
+		for (Session session : sessions) {
+			for (String id : ids(get(session, "/api/v1/accounts"))) {
+				assertThat(delete(session, "/api/v1/accounts/{id}", id)).hasStatus(HttpStatus.NO_CONTENT);
+			}
+			for (String id : ids(get(session, "/api/v1/categories"))) {
+				assertThat(delete(session, "/api/v1/categories/{id}", id)).hasStatus(HttpStatus.NO_CONTENT);
+			}
+		}
+	}
+
+	private static List<String> ids(MvcTestResult list) {
+		assertThat(list).hasStatusOk();
+		try {
+			return JsonPath.read(list.getResponse().getContentAsString(), "$[*].id");
+		}
+		catch (UnsupportedEncodingException ex) {
+			throw new IllegalStateException(ex);
+		}
 	}
 
 	/** Joins every other session to {@code admin}'s family (everyone signs up into their own). */

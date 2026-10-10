@@ -289,6 +289,7 @@ class FamilyFlowTests {
 		Session bob = TestUsers.register(this.mvc);
 		Session carol = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
+		this.api.clearDefaults(alice, bob);
 		UUID food = this.api.category(alice, "expense", "Food", "shared");
 		UUID card = this.api.account(alice, "Card", "100");
 		this.api.pay(alice, card, food, "30", "2026-10-01");
@@ -317,6 +318,7 @@ class FamilyFlowTests {
 	void movingOutAsTheLastMemberKeepsTheOldFamilysCategories() {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
+		this.api.clearDefaults(alice, bob);
 		this.api.category(bob, "expense", "Hobby", "shared");
 
 		assertThat(this.api.join(alice, bob)).hasStatusOk();
