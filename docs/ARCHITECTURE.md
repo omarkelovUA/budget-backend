@@ -461,6 +461,7 @@ com.familybudget
   category/
   transaction/
   budget/
+  sync/              # the mobile app's change feed (§6.5); depends on all of the above
 
 com.familybudget.<module>
   controller/        # REST controllers
@@ -506,6 +507,15 @@ is declared an *open* module since every feature uses it.
   lists, returning `{content, page, size, totalElements, totalPages}` — our own
   `PageView` record, not Spring Data's `Page` JSON. Other lists are small and unpaged.
 - Money is JSON numbers with two decimals (`NUMERIC(19,2)` in the database).
+- **Client ids:** creating an account, category, transaction or budget accepts an
+  optional `id` (UUID) from the client, which the mobile app sends so that retrying a
+  create is safe (§6.5).
+  - If that id already exists and the caller can see the row, the create returns it
+    unchanged with the usual `201`, and nothing happens twice (no second balance move).
+  - If the caller can't see it, the server answers `409 id-conflict`.
+  - Without an `id`, the server generates one.
+  - The id in the response is authoritative: a category created with the name of a
+    family category merges into it and comes back with that category's id.
 
 ### 5.4 Error handling
 
@@ -530,7 +540,8 @@ Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `transient-account`, `recipient-not-in-family`, `insufficient-in-transit`,
 `unsupported-language`, `invalid-used-currencies`, `default-currency-not-used`,
 `unsupported-theme`, `invalid-google-token`, `google-unavailable`,
-`google-link-confirmation-required`, `validation-failed`.
+`google-link-confirmation-required`, `id-conflict`, `invalid-sync-cursor`,
+`validation-failed`.
 
 `detail` texts are English and meant for developers and logs; the backend has no
 `MessageSource`. Clients show their own, translated text keyed by the `type` slug (the
@@ -694,6 +705,65 @@ only changes those two beans.
   `deploy/deploy.sh <api|web> <sha>` and smoke-tests `/actuator/health` (or `/`).
   Rollback is `deploy.sh` with an older SHA. The step-by-step setup is in the
   workspace's `.docs/prod_deployment.md`.
+
+### 6.5 Mobile sync
+
+The Android app works offline on its own database and syncs when it can. It pushes its
+queued writes through the normal endpoints, using client ids (§5.3). It then pulls with
+`GET /api/v1/sync/changes?since=<cursor>`, which returns what changed for the caller
+since that cursor.
+
+**Change tracking (`V22`).** Triggers keep three records:
+- **`sync_txid`:** every row of `accounts`, `categories`, `transactions`, `budgets`,
+  `users` and `families` carries the id of the transaction that last wrote it
+  (`pg_current_xact_id()`). It is set on insert and on every update, including the bulk
+  balance updates.
+- **`sync_tombstones`:** a deleted row leaves its id and `scope_ids`, whose data it was:
+  - the owner user, for accounts
+  - the owning user or family, for categories and budgets
+  - the touched accounts, for transactions
+
+  A category or budget moved to another owner, for example hidden by the admin, leaves a
+  tombstone for its old owner.
+- **`sync_markers`:** per-user events.
+  - `RESET` when what someone may see changed: their grants (`account_access`), or
+    membership and roles in their old or new family (`family_members`). Every member of
+    both families gets one.
+  - `ACCOUNT_ORDER` and `CATEGORY_ORDER` when their custom order changed.
+
+**The cursor** is the horizon `pg_snapshot_xmin(pg_current_snapshot())`: the oldest
+transaction still running when the request is served. A window covers
+`since <= sync_txid < horizon`.
+- Every transaction below the horizon has finished, so no row stamped there can appear
+  later.
+- A row written by a transaction still running is picked up by the next call.
+- A sequence or the largest txid seen would not be safe: a slow transaction could commit
+  a lower number after the client had already moved past it.
+
+**The answer.**
+- **`accounts`, `categories`, `transactions` and `budgets`:** rows changed in the window
+  that the caller can see, in the same views as the list endpoints. Each module answers
+  for its own tables (`*Service.changes`).
+- **`deleted`:** for each of those four, the tombstones in the caller's scope, plus
+  changed rows the caller no longer sees, such as an account its owner closed.
+- **`settings`:** sent when the caller's `users` row changed.
+- **`family`:** sent when the family's row or a member's `users` row changed.
+- **`accountOrder` / `categoryOrder`:** sent when their marker is in the window.
+- **`resetRequired: true`:** comes with a fresh cursor and nothing else, in three cases:
+  - `since` is missing (first sync)
+  - a `RESET` marker for the caller falls in the window
+  - the window holds more than 1,000 changes (a long time offline)
+
+  The app then downloads everything through the list endpoints and continues from that
+  cursor.
+- **An unreadable cursor:** `400 invalid-sync-cursor`.
+
+**Not covered.**
+- A budget's `factAmount` is correct when sent, but isn't re-sent when someone else's
+  payment changes it. The app refreshes shared budgets online.
+- Family transfers aren't in the feed, and their creates take no client id: they're
+  online-only on mobile.
+- Tombstones and markers aren't purged yet.
 
 ## 7. Explicit v1 simplifications (revisit later, not now)
 
