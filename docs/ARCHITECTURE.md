@@ -418,7 +418,9 @@ The Angular SPA (its stack, structure and auth handling) is described in the
   browser sees one origin — no CORS, and the refresh cookie (`Path=/api/v1/auth`,
   `SameSite=Strict`) behaves as in production (§6.4).
 
-The Android app (`budget-app-mobile`) is a second client. It works offline on its own
+The Android app (`budget-app-mobile`) is the **main client**: every user has it, and only
+some also use the web. It covers everything the SPA does, family administration included,
+with the family actions online only. It works offline on its own
 database, and sync is opt-in. It signs in with Google only: it sends the ID token it got
 from Credential Manager to `POST /auth/google/mobile` and keeps both of our tokens itself,
 refreshing once per 401 through `/auth/mobile/refresh` (§6.1, §6.2). Syncing, it replays
