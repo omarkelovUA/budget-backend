@@ -23,6 +23,8 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import com.familybudget.IntegrationTest;
 import com.familybudget.TestUsers;
 import com.familybudget.TestUsers.Session;
+import com.familybudget.security.service.AccessTokenService;
+import com.familybudget.security.service.RefreshTokenCleanup;
 
 /** Password login path and refresh-token rotation (ARCHITECTURE.md §6.1, §6.2). */
 @IntegrationTest

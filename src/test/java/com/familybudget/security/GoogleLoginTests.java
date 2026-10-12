@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import com.familybudget.IntegrationTest;
 import com.familybudget.TestUsers;
 import com.familybudget.TestUsers.Session;
+import com.familybudget.security.web.OAuth2LoginSuccessHandler;
 
 /**
  * Google login path (ARCHITECTURE.md §6.1). Google itself can't be reached from tests, so

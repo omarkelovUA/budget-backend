@@ -443,12 +443,12 @@ The Angular SPA (its stack, structure and auth handling) is described in the
 
 ### 5.2 Module / package layout
 
-Package-by-feature, not package-by-layer, to keep each domain's controller/service/repo/
-entity/dto together:
+Package-by-feature at the top, layers inside: each domain's controller/service/repo/
+entity/dto stay together in one module, split by layer within it:
 
 ```
 com.familybudget
-  common/            # ProblemDetail error handling, pagination, auditing base entity
+  common/            # ProblemDetail error handling, pagination, @CurrentUserId (open module)
   security/          # JWT filter, OAuth2 success handler, JWT issuing/validation, roles
   user/              # User entity, registration, profile
   family/            # Family, FamilyMembership, email invitations, join requests
@@ -456,14 +456,23 @@ com.familybudget
   category/
   transaction/
   budget/
+
+com.familybudget.<module>
+  controller/        # REST controllers
+  service/           # *Service plus event listeners (setup, sync, handover, cleanup)
+  repository/        # Spring Data repositories
+  entity/            # JPA entities
+  model/             # views, requests, refs, enums
+  event/             # events other modules listen to
+  config/, web/      # where a module has them (security, common, user)
 ```
 
-Each feature package is flat: `*Controller`, `*Service`, `*Repository`, `*Entity` and
-request/response records. Only the `*Service` and its view records are `public` (the
-module's API); repositories and entities are package-private, so Java visibility and
-Spring Modulith both stop other modules reaching them. Cross-feature calls go through the
-other feature's `*Service`, never its repository — keeps future extraction into separate
-services possible without a rewrite.
+A module's API is its `service`, `model` and `event` packages, each marked
+`@NamedInterface`. `controller`, `repository` and `entity` are internal: their classes are
+`public` (the layers sit in different packages) but Spring Modulith fails the build if
+another module touches them. Cross-feature calls go through the other feature's
+`*Service`, never its repository — keeps future extraction into separate services possible
+without a rewrite. Each sub-package of a feature module is `@NullMarked`.
 
 `security` depends on `user` (to verify passwords and find-or-create Google users), never
 the other way round. Controllers in any module get the caller's id via `common`'s

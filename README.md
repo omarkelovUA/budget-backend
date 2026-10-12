@@ -93,6 +93,6 @@ ARCHITECTURE.md §5.4). Everything except `/auth/*` and `/actuator/health` needs
 ## Layout
 
 Package-by-feature (`com.familybudget`), one Spring Modulith module each: `common`,
-`security`, `user`, `family`, `account`, `category`, `transaction`, `budget`. Only a
-module's `*Service` and view records are public; repositories and entities are
-package-private.
+`security`, `user`, `family`, `account`, `category`, `transaction`, `budget`. Inside a
+module, classes sit in layer packages: `controller`, `service`, `repository`, `entity`,
+`model`, `event`. Only `service`, `model` and `event` are visible to other modules.
