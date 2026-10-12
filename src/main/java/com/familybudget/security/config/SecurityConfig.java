@@ -36,6 +36,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import com.familybudget.security.service.GoogleIdTokenVerifier;
 import com.familybudget.security.service.SessionVersionValidator;
 import com.familybudget.security.web.OAuth2LoginSuccessHandler;
 import com.familybudget.security.web.ProblemResponses;
@@ -58,7 +59,7 @@ import com.familybudget.user.service.UserService;
 class SecurityConfig {
 
 	private static final String[] AUTH_PATHS = { "/api/v1/auth/register", "/api/v1/auth/login",
-			"/api/v1/auth/refresh", "/api/v1/auth/logout" };
+			"/api/v1/auth/refresh", "/api/v1/auth/logout", "/api/v1/auth/google/mobile" };
 
 	@Bean
 	@Order(1)
@@ -109,6 +110,14 @@ class SecurityConfig {
 		DefaultBearerTokenResolver delegate = new DefaultBearerTokenResolver();
 		return (request) -> request.getRequestURI().startsWith(RefreshTokenCookies.PATH + "/") ? null
 				: delegate.resolve(request);
+	}
+
+	/** Not a {@code JwtDecoder} bean: that would clash with the resource server's. */
+	@Bean
+	GoogleIdTokenVerifier googleIdTokenVerifier(
+			@Value("${spring.security.oauth2.client.registration.google.client-id}") String clientId) {
+		return new GoogleIdTokenVerifier(NimbusJwtDecoder.withJwkSetUri(GoogleIdTokenVerifier.JWK_SET_URI).build(),
+				clientId);
 	}
 
 	@Bean

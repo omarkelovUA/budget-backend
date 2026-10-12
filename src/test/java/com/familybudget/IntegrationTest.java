@@ -11,11 +11,12 @@ import org.springframework.context.annotation.Import;
 
 /**
  * Full application context against a real Postgres (Testcontainers). Every test class
- * using this shares one cached context and therefore one container.
+ * using this shares one cached context and therefore one container. Google ID tokens
+ * are trusted when signed by {@link TestGoogleIdTokens}.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
-@Import(TestcontainersConfiguration.class)
+@Import({ TestcontainersConfiguration.class, TestGoogleIdTokens.Config.class })
 @SpringBootTest
 @AutoConfigureMockMvc
 public @interface IntegrationTest {
