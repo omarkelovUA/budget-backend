@@ -10,23 +10,17 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.CreationTimestamp;
 import org.jspecify.annotations.Nullable;
 
+import com.familybudget.common.entity.ClientIdEntity;
 import com.familybudget.transaction.model.TransactionKind;
 
 /** Immutable once recorded: correcting a transaction means deleting and re-creating it. */
 @Entity
 @Table(name = "transactions")
-public class TransactionEntity {
-
-	@Id
-	@GeneratedValue(strategy = GenerationType.UUID)
-	private @Nullable UUID id;
+public class TransactionEntity extends ClientIdEntity {
 
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false, updatable = false)
@@ -89,13 +83,6 @@ public class TransactionEntity {
 		transaction.fromAccountId = fromAccountId;
 		transaction.toAccountId = toAccountId;
 		return transaction;
-	}
-
-	public UUID getId() {
-		if (this.id == null) {
-			throw new IllegalStateException("Transaction has not been persisted yet");
-		}
-		return this.id;
 	}
 
 	public TransactionKind getKind() {

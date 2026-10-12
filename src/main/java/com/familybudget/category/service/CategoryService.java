@@ -4,6 +4,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -25,6 +26,7 @@ import com.familybudget.category.model.CategoryType;
 import com.familybudget.category.model.CategoryView;
 import com.familybudget.category.repository.CategoryRepository;
 import com.familybudget.common.exception.ApiException;
+import com.familybudget.common.exception.IdConflictException;
 import com.familybudget.common.exception.NotFoundException;
 import com.familybudget.common.model.AccessScope;
 import com.familybudget.common.model.OwnerType;
@@ -88,9 +90,16 @@ public class CategoryService {
 	@Transactional
 	public CategoryView create(UUID userId, CategoryRequest request) {
 		AccessScope scope = this.familyService.scopeFor(userId);
+		if (request.id() != null) {
+			Optional<CategoryEntity> existing = this.categories.findById(request.id());
+			if (existing.isPresent()) {
+				return replay(scope, existing.get());
+			}
+		}
 		requireUnique(scope, request.type(), request.name(), null);
 		CategoryEntity category = new CategoryEntity(AccessScope.ownerTypeFor(request.visibility()),
 				scope.ownerIdFor(request.visibility()), request.type());
+		category.useClientId(request.id());
 		category.apply(request);
 		if (request.visibility() == Visibility.SHARED) {
 			category.shareWith(scope.ownerIdFor(Visibility.SHARED), addedBy(userId));
@@ -219,7 +228,7 @@ public class CategoryService {
 			.findFirstByOwnerTypeAndOwnerIdAndTypeAndName(OwnerType.USER, userId, CategoryType.EXPENSE, name)
 			.orElseGet(() -> {
 				CategoryEntity category = new CategoryEntity(OwnerType.USER, userId, CategoryType.EXPENSE);
-				category.apply(new CategoryRequest(CategoryType.EXPENSE, name, "assets/family.svg", "gray",
+				category.apply(new CategoryRequest(null, CategoryType.EXPENSE, name, "assets/family.svg", "gray",
 						Visibility.PRIVATE));
 				return this.categories.save(category);
 			})
@@ -245,6 +254,14 @@ public class CategoryService {
 		return this.categories.findByIdIn(ids)
 			.stream()
 			.collect(Collectors.toMap(CategoryEntity::getId, CategoryEntity::toView, (a, b) -> a));
+	}
+
+	/** A create sent again with the same client id returns what the first one made. */
+	private static CategoryView replay(AccessScope scope, CategoryEntity category) {
+		if (!scope.canAccess(category.getOwnerType(), category.getOwnerId())) {
+			throw new IdConflictException();
+		}
+		return category.toView();
 	}
 
 	private void merge(CategoryEntity from, CategoryEntity into) {

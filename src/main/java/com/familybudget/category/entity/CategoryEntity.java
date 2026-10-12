@@ -7,9 +7,6 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.CreationTimestamp;
 import org.jspecify.annotations.Nullable;
@@ -17,16 +14,13 @@ import org.jspecify.annotations.Nullable;
 import com.familybudget.category.model.CategoryRequest;
 import com.familybudget.category.model.CategoryType;
 import com.familybudget.category.model.CategoryView;
+import com.familybudget.common.entity.ClientIdEntity;
 import com.familybudget.common.model.OwnerType;
 import com.familybudget.common.model.Visibility;
 
 @Entity
 @Table(name = "categories")
-public class CategoryEntity {
-
-	@Id
-	@GeneratedValue(strategy = GenerationType.UUID)
-	private @Nullable UUID id;
+public class CategoryEntity extends ClientIdEntity {
 
 	// A category moves between a user and their family: shared, hidden or handed over.
 	@Enumerated(EnumType.STRING)
@@ -63,13 +57,6 @@ public class CategoryEntity {
 		this.ownerType = ownerType;
 		this.ownerId = ownerId;
 		this.type = type;
-	}
-
-	public UUID getId() {
-		if (this.id == null) {
-			throw new IllegalStateException("Category has not been persisted yet");
-		}
-		return this.id;
 	}
 
 	public OwnerType getOwnerType() {

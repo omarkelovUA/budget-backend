@@ -4,10 +4,12 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -28,6 +30,7 @@ import com.familybudget.category.model.CategoryType;
 import com.familybudget.category.model.CategoryView;
 import com.familybudget.category.service.CategoryService;
 import com.familybudget.common.exception.ApiException;
+import com.familybudget.common.exception.IdConflictException;
 import com.familybudget.common.exception.NotFoundException;
 import com.familybudget.common.model.AccessScope;
 import com.familybudget.common.model.PageView;
@@ -106,11 +109,18 @@ public class TransactionService {
 
 	@Transactional
 	public TransactionView create(UUID userId, TransactionRequest request) {
+		if (request.id() != null) {
+			Optional<TransactionEntity> existing = this.transactions.findById(request.id());
+			if (existing.isPresent()) {
+				return replay(userId, existing.get());
+			}
+		}
 		AccessScope scope = this.familyService.scopeFor(userId);
 		TransactionEntity transaction = switch (request.kind()) {
 			case PAYMENT -> recordPayment(scope, request);
 			case TRANSFER -> recordTransfer(scope, request);
 		};
+		transaction.useClientId(request.id());
 		return toViews(userId, List.of(this.transactions.save(transaction))).getFirst();
 	}
 
@@ -237,6 +247,14 @@ public class TransactionService {
 			.allMatch((account) -> account.access().canUse() && !account.closed() && !account.inTransit());
 		return usable && (transaction.getRecordedBy().equals(userId)
 				|| accounts.stream().anyMatch((account) -> account.access() == AccountAccess.OWNER));
+	}
+
+	/** A create sent again with the same client id returns what the first one made. */
+	private TransactionView replay(UUID userId, TransactionEntity transaction) {
+		if (Collections.disjoint(this.accountService.viewableIds(userId), transaction.accountIds())) {
+			throw new IdConflictException();
+		}
+		return toViews(userId, List.of(transaction)).getFirst();
 	}
 
 	private List<TransactionView> toViews(UUID userId, List<TransactionEntity> entities) {

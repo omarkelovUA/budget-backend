@@ -40,7 +40,7 @@ public class DefaultAccountSetup {
 	}
 
 	private static AccountRequest request(String name, String currency, String icon, String color) {
-		return new AccountRequest(name, BigDecimal.ZERO, currency, "assets/" + icon + ".svg", color, null);
+		return new AccountRequest(null, name, BigDecimal.ZERO, currency, "assets/" + icon + ".svg", color, null);
 	}
 
 }

@@ -47,7 +47,7 @@ public class DefaultCategorySetup {
 	void on(UserRegistered event) {
 		boolean ukrainian = "uk".equals(event.language());
 		for (Default category : DEFAULTS) {
-			this.categoryService.create(event.userId(), new CategoryRequest(category.type(),
+			this.categoryService.create(event.userId(), new CategoryRequest(null, category.type(),
 					ukrainian ? category.uk() : category.en(), "assets/" + category.icon() + ".svg", category.color(),
 					Visibility.SHARED));
 		}

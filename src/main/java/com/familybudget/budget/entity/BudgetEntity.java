@@ -9,22 +9,16 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.CreationTimestamp;
 import org.jspecify.annotations.Nullable;
 
+import com.familybudget.common.entity.ClientIdEntity;
 import com.familybudget.common.model.OwnerType;
 
 @Entity
 @Table(name = "budgets")
-public class BudgetEntity {
-
-	@Id
-	@GeneratedValue(strategy = GenerationType.UUID)
-	private @Nullable UUID id;
+public class BudgetEntity extends ClientIdEntity {
 
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false, updatable = false)
@@ -53,13 +47,6 @@ public class BudgetEntity {
 	public BudgetEntity(OwnerType ownerType, UUID ownerId) {
 		this.ownerType = ownerType;
 		this.ownerId = ownerId;
-	}
-
-	public UUID getId() {
-		if (this.id == null) {
-			throw new IllegalStateException("Budget has not been persisted yet");
-		}
-		return this.id;
 	}
 
 	public OwnerType getOwnerType() {

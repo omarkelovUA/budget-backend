@@ -13,8 +13,9 @@ import org.jspecify.annotations.Nullable;
 /**
  * A payment sets {@code accountId} + {@code categoryId}; a transfer sets
  * {@code fromAccountId} + {@code toAccountId}.
+ * {@code id}: the client's id for a create (mobile sync); ignored by updates.
  */
-public record TransactionRequest(@NotNull TransactionKind kind,
+public record TransactionRequest(@Nullable UUID id, @NotNull TransactionKind kind,
 		@NotNull @Positive @Digits(integer = 17, fraction = 2) BigDecimal amount, @NotNull LocalDate date,
 		@Nullable @Size(max = 500) String note, @Nullable UUID accountId, @Nullable UUID categoryId,
 		@Nullable UUID fromAccountId, @Nullable UUID toAccountId) {

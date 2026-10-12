@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -27,6 +28,7 @@ import com.familybudget.account.model.GrantLevel;
 import com.familybudget.account.model.TransientAccountView;
 import com.familybudget.account.repository.AccountRepository;
 import com.familybudget.common.exception.ApiException;
+import com.familybudget.common.exception.IdConflictException;
 import com.familybudget.common.exception.NotFoundException;
 import com.familybudget.common.service.UserOrder;
 import com.familybudget.family.service.FamilyService;
@@ -84,7 +86,14 @@ public class AccountService {
 
 	@Transactional
 	public AccountView create(UUID userId, AccountRequest request) {
+		if (request.id() != null) {
+			Optional<AccountEntity> existing = this.accounts.findById(request.id());
+			if (existing.isPresent()) {
+				return replay(userId, existing.get());
+			}
+		}
 		AccountEntity account = new AccountEntity(userId);
+		account.useClientId(request.id());
 		account.apply(request, grants(userId, request.grants()));
 		return view(userId, this.accounts.save(account));
 	}
@@ -168,6 +177,14 @@ public class AccountService {
 		return this.accounts.findById(id)
 			.filter((account) -> account.accessFor(userId).canView())
 			.orElseThrow(() -> new NotFoundException("Account not found"));
+	}
+
+	/** A create sent again with the same client id returns what the first one made. */
+	private AccountView replay(UUID userId, AccountEntity account) {
+		if (!account.accessFor(userId).canView()) {
+			throw new IdConflictException();
+		}
+		return view(userId, account);
 	}
 
 	private AccountEntity owned(UUID userId, UUID id) {

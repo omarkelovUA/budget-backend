@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.jspecify.annotations.Nullable;
@@ -19,6 +20,7 @@ import com.familybudget.budget.repository.BudgetRepository;
 import com.familybudget.category.model.CategoryView;
 import com.familybudget.category.service.CategoryService;
 import com.familybudget.common.exception.ApiException;
+import com.familybudget.common.exception.IdConflictException;
 import com.familybudget.common.exception.NotFoundException;
 import com.familybudget.common.model.AccessScope;
 import com.familybudget.common.model.OwnerType;
@@ -65,8 +67,15 @@ public class BudgetService {
 	@Transactional
 	public BudgetView create(UUID userId, BudgetRequest request) {
 		AccessScope scope = this.familyService.scopeFor(userId);
+		if (request.id() != null) {
+			Optional<BudgetEntity> existing = this.budgets.findById(request.id());
+			if (existing.isPresent()) {
+				return replay(scope, existing.get());
+			}
+		}
 		BudgetEntity budget = new BudgetEntity(AccessScope.ownerTypeFor(request.visibility()),
 				scope.ownerIdFor(request.visibility()));
+		budget.useClientId(request.id());
 		return save(budget, scope, request);
 	}
 
@@ -101,6 +110,14 @@ public class BudgetService {
 			throw new ApiException(HttpStatus.CONFLICT, "budget-exists",
 					"There is already a budget for this category and month");
 		}
+	}
+
+	/** A create sent again with the same client id returns what the first one made. */
+	private BudgetView replay(AccessScope scope, BudgetEntity budget) {
+		if (!scope.canAccess(budget.getOwnerType(), budget.getOwnerId())) {
+			throw new IdConflictException();
+		}
+		return toView(budget, this.categoryService.views(List.of(budget.getCategoryId())).get(budget.getCategoryId()));
 	}
 
 	private BudgetEntity accessible(AccessScope scope, UUID id) {

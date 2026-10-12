@@ -12,9 +12,6 @@ import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.MapKeyColumn;
 import jakarta.persistence.Table;
@@ -27,6 +24,7 @@ import com.familybudget.account.model.AccountRef;
 import com.familybudget.account.model.AccountRequest;
 import com.familybudget.account.model.GrantLevel;
 import com.familybudget.account.model.TransientAccountView;
+import com.familybudget.common.entity.ClientIdEntity;
 
 /**
  * {@code @DynamicUpdate}: balances also move through {@link AccountRepository#addToBalance};
@@ -35,11 +33,7 @@ import com.familybudget.account.model.TransientAccountView;
 @Entity
 @Table(name = "accounts")
 @DynamicUpdate
-public class AccountEntity {
-
-	@Id
-	@GeneratedValue(strategy = GenerationType.UUID)
-	private @Nullable UUID id;
+public class AccountEntity extends ClientIdEntity {
 
 	@Column(nullable = false, updatable = false)
 	private UUID ownerUserId;
@@ -82,13 +76,6 @@ public class AccountEntity {
 
 	public AccountEntity(UUID ownerUserId) {
 		this.ownerUserId = ownerUserId;
-	}
-
-	public UUID getId() {
-		if (this.id == null) {
-			throw new IllegalStateException("Account has not been persisted yet");
-		}
-		return this.id;
 	}
 
 	public UUID getOwnerUserId() {
