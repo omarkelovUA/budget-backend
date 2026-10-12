@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -30,6 +31,9 @@ import com.familybudget.account.repository.AccountRepository;
 import com.familybudget.common.exception.ApiException;
 import com.familybudget.common.exception.IdConflictException;
 import com.familybudget.common.exception.NotFoundException;
+import com.familybudget.common.model.SyncChanges;
+import com.familybudget.common.model.SyncWindow;
+import com.familybudget.common.service.SyncTombstones;
 import com.familybudget.common.service.UserOrder;
 import com.familybudget.family.service.FamilyService;
 import com.familybudget.user.model.UserView;
@@ -53,15 +57,18 @@ public class AccountService {
 
 	private final UserOrder userOrder;
 
+	private final SyncTombstones tombstones;
+
 	private static final UserOrder.Table POSITIONS = new UserOrder.Table("account_positions", "account_id");
 
 	AccountService(AccountRepository accounts, FamilyService familyService, UserService userService,
-			EntityManager entityManager, UserOrder userOrder) {
+			EntityManager entityManager, UserOrder userOrder, SyncTombstones tombstones) {
 		this.accounts = accounts;
 		this.familyService = familyService;
 		this.userService = userService;
 		this.entityManager = entityManager;
 		this.userOrder = userOrder;
+		this.tombstones = tombstones;
 	}
 
 	/**
@@ -71,6 +78,22 @@ public class AccountService {
 	public List<AccountView> list(UUID userId, boolean closed) {
 		return views(userId, closed ? this.accounts.findClosedOwnedBy(userId)
 				: this.userOrder.sort(POSITIONS, userId, this.accounts.findOpenViewable(userId), AccountEntity::getId));
+	}
+
+	/**
+	 * Sync feed (ARCHITECTURE.md §6.5): accounts written in {@code window} as {@link #list}
+	 * would show them. Ones the user no longer sees there (closed by their owner, say)
+	 * count as deleted, like the ones actually deleted.
+	 */
+	public SyncChanges<AccountView> changes(UUID userId, SyncWindow window) {
+		List<AccountEntity> candidates = this.accounts
+			.findByIdIn(this.accounts.findChangedIds(userId, window.since(), window.until(), window.limit()));
+		List<AccountEntity> listed = candidates.stream().filter((account) -> isListed(userId, account)).toList();
+		Set<UUID> listedIds = listed.stream().map(AccountEntity::getId).collect(Collectors.toSet());
+		Set<UUID> deleted = new LinkedHashSet<>();
+		candidates.stream().map(AccountEntity::getId).filter((id) -> !listedIds.contains(id)).forEach(deleted::add);
+		deleted.addAll(this.tombstones.deleted("account", List.of(userId), window));
+		return new SyncChanges<>(views(userId, listed), List.copyOf(deleted));
 	}
 
 	/** The user's own order of the open accounts they see. */
@@ -177,6 +200,12 @@ public class AccountService {
 		return this.accounts.findById(id)
 			.filter((account) -> account.accessFor(userId).canView())
 			.orElseThrow(() -> new NotFoundException("Account not found"));
+	}
+
+	/** What {@link #list} shows: open accounts the user may view, closed ones they own. */
+	private static boolean isListed(UUID userId, AccountEntity account) {
+		AccountAccess access = account.accessFor(userId);
+		return account.isClosed() ? access == AccountAccess.OWNER : access.canView();
 	}
 
 	/** A create sent again with the same client id returns what the first one made. */

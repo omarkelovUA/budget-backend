@@ -80,4 +80,12 @@ public interface AccountRepository extends JpaRepository<AccountEntity, UUID> {
 
 	List<AccountEntity> findByIdIn(Collection<UUID> ids);
 
+	/** Regular accounts the user owns or holds a grant on, written within a sync window. */
+	@Query(nativeQuery = true, value = "select a.id from accounts a where a.transient_recipient_id is null"
+			+ " and a.sync_txid >= cast(cast(:since as text) as xid8) and a.sync_txid < cast(cast(:until as text) as xid8)"
+			+ " and (a.owner_user_id = :userId"
+			+ " or exists (select 1 from account_access g where g.account_id = a.id and g.user_id = :userId))"
+			+ " limit :limit")
+	List<UUID> findChangedIds(UUID userId, long since, long until, int limit);
+
 }
