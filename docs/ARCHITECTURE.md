@@ -414,14 +414,14 @@ The Angular SPA (its stack, structure and auth handling) is described in the
   redirects back to the SPA's `/auth/callback` (§6.1).
 - It switches on the `ProblemDetail` `type`, not the HTTP status (§5.4), so problem types
   are part of the API contract.
+- In local dev `ng serve` proxies `/api`, `/oauth2` and `/login/oauth2` here, so the
+  browser sees one origin — no CORS, and the refresh cookie (`Path=/api/v1/auth`,
+  `SameSite=Strict`) behaves as in production (§6.4).
 
 The Android app (planned, `budget-app-mobile`) is a second client. It signs in with Google
 only: it sends the ID token it got from Credential Manager to `POST /auth/google/mobile`
 and keeps both of our tokens itself, refreshing through `/auth/mobile/refresh` (§6.1,
 §6.2). Problem types reach it the same way.
-- In local dev `ng serve` proxies `/api`, `/oauth2` and `/login/oauth2` here, so the
-  browser sees one origin — no CORS, and the refresh cookie (`Path=/api/v1/auth`,
-  `SameSite=Strict`) behaves as in production (§6.4).
 
 ## 5. Backend architecture (Spring Boot)
 
@@ -529,8 +529,8 @@ Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `account-closed`, `grantee-not-in-family`, `close-target-required`, `invalid-currency`,
 `transient-account`, `recipient-not-in-family`, `insufficient-in-transit`,
 `unsupported-language`, `invalid-used-currencies`, `default-currency-not-used`,
-`unsupported-theme`, `invalid-google-token`, `google-link-confirmation-required`,
-`validation-failed`.
+`unsupported-theme`, `invalid-google-token`, `google-unavailable`,
+`google-link-confirmation-required`, `validation-failed`.
 
 `detail` texts are English and meant for developers and logs; the backend has no
 `MessageSource`. Clients show their own, translated text keyed by the `type` slug (the
@@ -590,7 +590,9 @@ The mobile path has no redirect to come back to, so the app signs in with Google
 and the backend checks the resulting ID token (`GoogleIdTokenVerifier`): Google's
 signature (keys from `https://www.googleapis.com/oauth2/v3/certs`), issuer
 `https://accounts.google.com` or `accounts.google.com`, audience = our
-`GOOGLE_CLIENT_ID`, and expiry. A bad token gets `401 invalid-google-token`. There is no
+`GOOGLE_CLIENT_ID`, and a non-empty `sub` and `exp`. A bad token gets
+`401 invalid-google-token`. If Google's keys can't be fetched, the token may be fine, so
+that's logged and answered `503 google-unavailable` instead. There is no
 password sign-up or login from mobile.
 
 No hand-written JWT filter: tokens are issued with Spring Security's `NimbusJwtEncoder`

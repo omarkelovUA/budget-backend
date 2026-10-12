@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 
 import com.familybudget.TestGoogleIdTokens;
 import com.familybudget.common.exception.ApiException;
@@ -55,12 +56,27 @@ class GoogleIdTokenVerifierTests {
 		});
 	}
 
+	@Test
+	void unreachableGoogleKeysAreReportedAsUnavailable() {
+		GoogleIdTokenVerifier offline = new GoogleIdTokenVerifier(
+				NimbusJwtDecoder.withJwkSetUri("http://127.0.0.1:1/certs").build(), TestGoogleIdTokens.CLIENT_ID);
+		String token = TestGoogleIdTokens.sign((claims) -> {
+		});
+
+		assertThatThrownBy(() -> offline.verify(token)).isInstanceOfSatisfying(ApiException.class, (ex) -> {
+			assertThat(ex.getType()).isEqualTo("google-unavailable");
+			assertThat(ex.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+		});
+	}
+
 	static Stream<String> invalidTokens() {
 		Instant now = Instant.now();
 		return Stream.of(
 				TestGoogleIdTokens.sign((claims) -> claims.issuedAt(now.minusSeconds(7200)).expiresAt(now.minusSeconds(3600))),
 				TestGoogleIdTokens.sign((claims) -> claims.audience(List.of("someone-else"))),
 				TestGoogleIdTokens.sign((claims) -> claims.issuer("https://evil.example")),
+				TestGoogleIdTokens.sign((claims) -> claims.claims((all) -> all.remove("sub"))),
+				TestGoogleIdTokens.sign((claims) -> claims.claims((all) -> all.remove("exp"))),
 				TestGoogleIdTokens.signWithForeignKey(), "not-a-jwt");
 	}
 
