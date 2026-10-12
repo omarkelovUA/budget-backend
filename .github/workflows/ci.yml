@@ -23,3 +23,53 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t budget-app-backend:ci .
+
+  # On main only: push the image to GHCR, then deploy it to the VM (.docs/prod_deployment.md).
+  publish:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/omarkelovua/budget-backend:${{ github.sha }}
+            ghcr.io/omarkelovua/budget-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency: production
+    env:
+      HOST: deploy@${{ vars.DOMAIN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Upload deploy files
+        run: scp deploy/compose.yaml deploy/deploy.sh deploy/backup.sh deploy/.env.example "$HOST:/opt/familybudget/"
+      - name: Deploy
+        run: ssh "$HOST" bash /opt/familybudget/deploy.sh api "$GITHUB_SHA"
+      - name: Smoke test
+        run: curl -fsS --retry 12 --retry-delay 5 --retry-all-errors "https://${{ vars.DOMAIN }}/actuator/health"

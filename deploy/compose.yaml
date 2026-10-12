@@ -1,0 +1,63 @@
+# Production stack on the VM (/opt/familybudget), copied there by CI on every backend deploy.
+# Secrets and the image tags come from .env next to it (template: .env.example).
+# Only `web` publishes ports; `api` and `db` are reachable only on the Compose network.
+name: familybudget
+
+services:
+  db:
+    # Never bump the major version without a dump and restore.
+    image: 'postgres:18-alpine'
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: familybudget
+      POSTGRES_USER: familybudget
+      POSTGRES_PASSWORD: '${POSTGRES_PASSWORD:?}'
+    volumes:
+      - 'postgres-data:/var/lib/postgresql'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U familybudget -d familybudget']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  api:
+    image: 'ghcr.io/omarkelovua/budget-backend:${API_TAG:?}'
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: 'jdbc:postgresql://db:5432/familybudget'
+      SPRING_DATASOURCE_USERNAME: familybudget
+      SPRING_DATASOURCE_PASSWORD: '${POSTGRES_PASSWORD:?}'
+      SPRING_DOCKER_COMPOSE_ENABLED: 'false'
+      # Trust Caddy's X-Forwarded-Proto, so the Google redirect URI is built as https.
+      SERVER_FORWARD_HEADERS_STRATEGY: native
+      JWT_SECRET: '${JWT_SECRET:?}'
+      GOOGLE_CLIENT_ID: '${GOOGLE_CLIENT_ID:?}'
+      GOOGLE_CLIENT_SECRET: '${GOOGLE_CLIENT_SECRET:?}'
+      FRONTEND_URL: 'https://${DOMAIN:?}'
+      CORS_ALLOWED_ORIGINS: 'https://${DOMAIN:?}'
+      REFRESH_COOKIE_SECURE: 'true'
+
+  web:
+    image: 'ghcr.io/omarkelovua/budget-front:${WEB_TAG:?}'
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      DOMAIN: '${DOMAIN:?}'
+      ACME_EMAIL: '${ACME_EMAIL:?}'
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      # Certificates: keep this volume, or Let's Encrypt rate limits bite on re-issue.
+      - 'caddy-data:/data'
+      - 'caddy-config:/config'
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

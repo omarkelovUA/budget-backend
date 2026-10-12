@@ -630,13 +630,32 @@ only changes those two beans.
   treat localhost as a secure context, so the `Secure` refresh cookie still works there
   (`REFRESH_COOKIE_SECURE=false` is the escape hatch). mkcert was the original idea and
   turned out unnecessary.
-- CORS restricted to the known frontend origin(s) per environment; unused in local dev,
-  where `ng serve` proxies the API so everything is same-origin.
+- CORS restricted to the known frontend origin(s) per environment. It's unused both in
+  local dev (`ng serve` proxies the API) and in production (Caddy serves the SPA and the
+  API from one origin), so everything is same-origin.
 - Packaging: multi-stage `Dockerfile` (JDK build → layered JRE runtime, non-root user).
   `compose.yaml` runs Postgres for `spring-boot:run`, plus the backend itself behind the
-  opt-in `app` profile. Deployment target is still open (PLAN.md open decision #4).
+  opt-in `app` profile.
+- Production: one Docker host (an Azure Ubuntu VM) running `deploy/compose.yaml`:
+  - `web`: the frontend image, Caddy with the SPA. It terminates TLS (automatic Let's
+    Encrypt), redirects HTTP to HTTPS, serves the SPA with an `index.html` fallback, and
+    proxies `/api/*`, `/oauth2/*`, `/login/oauth2/*` and `/actuator/health*` to `api`.
+    The only service that publishes ports (80, 443).
+  - `api`: this image, with `SERVER_FORWARD_HEADERS_STRATEGY=native` so Tomcat trusts
+    Caddy's `X-Forwarded-*` headers and the Google redirect URI comes out as
+    `https://<domain>/login/oauth2/code/google`. The other actuator endpoints aren't
+    proxied.
+  - `db`: PostgreSQL 18 on a named volume. `deploy/backup.sh` writes a daily `pg_dump`
+    and can upload it to Azure Blob storage.
+  - Secrets and the deployed image tags live in `.env` on the host
+    (`deploy/.env.example`).
 - CI: GitHub Actions in each repo — backend `./mvnw verify` (Testcontainers on the
-  runner's Docker) and an image build; frontend build + unit tests.
+  runner's Docker) and an image build; frontend build + unit tests. On `main` each repo
+  also pushes its image to GHCR (`ghcr.io/omarkelovua/budget-backend|budget-front`,
+  tagged with the commit SHA and `latest`). It then SSHes to the host as `deploy`, runs
+  `deploy/deploy.sh <api|web> <sha>` and smoke-tests `/actuator/health` (or `/`).
+  Rollback is `deploy.sh` with an older SHA. The step-by-step setup is in the
+  workspace's `.docs/prod_deployment.md`.
 
 ## 7. Explicit v1 simplifications (revisit later, not now)
 

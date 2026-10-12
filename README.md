@@ -52,6 +52,7 @@ All optional for local use; the defaults work out of the box.
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Comma-separated origins allowed to call the API directly (not needed behind the frontend's dev proxy). |
 | `REFRESH_COOKIE_SECURE` | `true` | `Secure` flag on the refresh cookie. Chrome accepts it on `http://localhost`; set `false` if your browser drops it. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | placeholder | Enables "Login with Google". Without them everything else works. |
+| `SERVER_FORWARD_HEADERS_STRATEGY` | none | Set to `native` behind a reverse proxy, so Google's redirect URI uses the proxy's `https` scheme. |
 
 ### Google login (optional)
 
@@ -63,6 +64,14 @@ All optional for local use; the defaults work out of the box.
    `.env` is git-ignored, and `docker compose` reads it, so
    `docker compose --profile app up -d` picks the values up. When running with `./mvnw`,
    export them instead.
+
+## Production
+
+`deploy/` holds the production stack for one Docker host: `compose.yaml` (Caddy + SPA,
+this API, Postgres), `.env.example`, `deploy.sh` and `backup.sh`. A push to `main` runs
+the tests, pushes the image to GHCR and deploys it over SSH (`.github/workflows/ci.yml`).
+The VM setup is in the workspace's `.docs/prod_deployment.md`; the topology is in
+ARCHITECTURE.md §6.4.
 
 ## API overview
 
