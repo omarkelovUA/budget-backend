@@ -418,10 +418,16 @@ The Angular SPA (its stack, structure and auth handling) is described in the
   browser sees one origin — no CORS, and the refresh cookie (`Path=/api/v1/auth`,
   `SameSite=Strict`) behaves as in production (§6.4).
 
-The Android app (planned, `budget-app-mobile`) is a second client. It signs in with Google
-only: it sends the ID token it got from Credential Manager to `POST /auth/google/mobile`
-and keeps both of our tokens itself, refreshing through `/auth/mobile/refresh` (§6.1,
-§6.2). Problem types reach it the same way.
+The Android app (`budget-app-mobile`) is a second client. It works offline on its own
+database, and sync is opt-in. It signs in with Google only: it sends the ID token it got
+from Credential Manager to `POST /auth/google/mobile` and keeps both of our tokens itself,
+refreshing once per 401 through `/auth/mobile/refresh` (§6.1, §6.2). Syncing, it replays
+its queued writes through the normal endpoints with its own ids (§5.3), then pulls
+`/sync/changes` (§6.5).
+- It sends the account's current balance and grants back with an account update, so a
+  `PUT` from the phone never undoes payments or unshares the account.
+- It treats every 4xx except 401 as a refused change and takes the server's state.
+- Problem types reach it the same way as the SPA.
 
 ## 5. Backend architecture (Spring Boot)
 
