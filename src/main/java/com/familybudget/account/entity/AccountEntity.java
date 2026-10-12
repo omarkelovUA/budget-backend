@@ -15,6 +15,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.MapKeyColumn;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.DynamicUpdate;
 import org.jspecify.annotations.Nullable;
@@ -48,6 +49,7 @@ public class AccountEntity extends ClientIdEntity {
 	@MapKeyColumn(name = "user_id")
 	@Column(name = "level", nullable = false)
 	@Enumerated(EnumType.STRING)
+	@BatchSize(size = 100)
 	private Map<UUID, GrantLevel> grants = new HashMap<>();
 
 	@Column(nullable = false)

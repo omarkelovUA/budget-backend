@@ -5,7 +5,9 @@ import java.time.YearMonth;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -76,21 +78,22 @@ public class BudgetService {
 	 */
 	public SyncChanges<BudgetView> changes(UUID userId, SyncWindow window) {
 		AccessScope scope = this.familyService.scopeFor(userId);
-		List<BudgetEntity> changed = this.budgets
-			.findByIdIn(this.budgets.findChangedIds(scope.userId(), scope.familyId(), window.since(), window.until(),
-					window.limit()))
+		List<UUID> ids = this.budgets.findChangedIds(scope.userId(), scope.familyId(), window.since(), window.until(),
+				window.limit());
+		List<UUID> ownerIds = (scope.familyId() != null) ? List.of(scope.userId(), scope.familyId())
+				: List.of(scope.userId());
+		List<UUID> tombstones = this.tombstones.deleted("budget", ownerIds, window);
+		if (SyncChanges.exceeds(window, ids.size(), tombstones.size())) {
+			return SyncChanges.tooMany();
+		}
+		List<BudgetEntity> changed = this.budgets.findByIdIn(ids)
 			.stream()
 			.filter((budget) -> scope.canAccess(budget.getOwnerType(), budget.getOwnerId()))
 			.toList();
 		Map<UUID, CategoryView> categories = this.categoryService
 			.views(changed.stream().map(BudgetEntity::getCategoryId).toList());
-		List<UUID> changedIds = changed.stream().map(BudgetEntity::getId).toList();
-		List<UUID> ownerIds = (scope.familyId() != null) ? List.of(scope.userId(), scope.familyId())
-				: List.of(scope.userId());
-		List<UUID> deleted = this.tombstones.deleted("budget", ownerIds, window)
-			.stream()
-			.filter((id) -> !changedIds.contains(id))
-			.toList();
+		Set<UUID> changedIds = changed.stream().map(BudgetEntity::getId).collect(Collectors.toSet());
+		List<UUID> deleted = tombstones.stream().filter((id) -> !changedIds.contains(id)).toList();
 		return new SyncChanges<>(
 				changed.stream().map((budget) -> toView(budget, categories.get(budget.getCategoryId()))).toList(),
 				deleted);
@@ -100,6 +103,7 @@ public class BudgetService {
 	public BudgetView create(UUID userId, BudgetRequest request) {
 		AccessScope scope = this.familyService.scopeFor(userId);
 		if (request.id() != null) {
+			this.tombstones.requireNotDeleted("budget", request.id());
 			Optional<BudgetEntity> existing = this.budgets.findById(request.id());
 			if (existing.isPresent()) {
 				return replay(scope, existing.get());

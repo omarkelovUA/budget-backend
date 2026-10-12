@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -87,14 +88,19 @@ public class CategoryService {
 	 */
 	public SyncChanges<CategoryView> changes(UUID userId, SyncWindow window) {
 		AccessScope scope = this.familyService.scopeFor(userId);
-		List<CategoryView> changed = this.categories
-			.findByIdIn(this.categories.findChangedIds(scope.userId(), scope.familyId(), window.since(), window.until(),
-					window.limit()))
+		List<UUID> ids = this.categories.findChangedIds(scope.userId(), scope.familyId(), window.since(),
+				window.until(), window.limit());
+		List<UUID> tombstones = this.tombstones.deleted("category", ownerIds(scope), window);
+		if (SyncChanges.exceeds(window, ids.size(), tombstones.size())) {
+			return SyncChanges.tooMany();
+		}
+		List<CategoryView> changed = this.categories.findByIdIn(ids)
 			.stream()
 			.filter((category) -> scope.canAccess(category.getOwnerType(), category.getOwnerId()))
 			.map(CategoryEntity::toView)
 			.toList();
-		return new SyncChanges<>(changed, deletedSince(scope, window, changed.stream().map(CategoryView::id).toList()));
+		Set<UUID> changedIds = changed.stream().map(CategoryView::id).collect(Collectors.toSet());
+		return new SyncChanges<>(changed, tombstones.stream().filter((id) -> !changedIds.contains(id)).toList());
 	}
 
 	/** Sync feed: the ids {@link #list} returns, in the user's order. */
@@ -118,6 +124,7 @@ public class CategoryService {
 	public CategoryView create(UUID userId, CategoryRequest request) {
 		AccessScope scope = this.familyService.scopeFor(userId);
 		if (request.id() != null) {
+			this.tombstones.requireNotDeleted("category", request.id());
 			Optional<CategoryEntity> existing = this.categories.findById(request.id());
 			if (existing.isPresent()) {
 				return replay(scope, existing.get());
@@ -283,13 +290,8 @@ public class CategoryService {
 			.collect(Collectors.toMap(CategoryEntity::getId, CategoryEntity::toView, (a, b) -> a));
 	}
 
-	private List<UUID> deletedSince(AccessScope scope, SyncWindow window, List<UUID> changed) {
-		List<UUID> ownerIds = (scope.familyId() != null) ? List.of(scope.userId(), scope.familyId())
-				: List.of(scope.userId());
-		return this.tombstones.deleted("category", ownerIds, window)
-			.stream()
-			.filter((id) -> !changed.contains(id))
-			.toList();
+	private static List<UUID> ownerIds(AccessScope scope) {
+		return (scope.familyId() != null) ? List.of(scope.userId(), scope.familyId()) : List.of(scope.userId());
 	}
 
 	/** A create sent again with the same client id returns what the first one made. */

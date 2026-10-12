@@ -86,13 +86,17 @@ public class AccountService {
 	 * count as deleted, like the ones actually deleted.
 	 */
 	public SyncChanges<AccountView> changes(UUID userId, SyncWindow window) {
-		List<AccountEntity> candidates = this.accounts
-			.findByIdIn(this.accounts.findChangedIds(userId, window.since(), window.until(), window.limit()));
+		List<UUID> ids = this.accounts.findChangedIds(userId, window.since(), window.until(), window.limit());
+		List<UUID> tombstones = this.tombstones.deleted("account", List.of(userId), window);
+		if (SyncChanges.exceeds(window, ids.size(), tombstones.size())) {
+			return SyncChanges.tooMany();
+		}
+		List<AccountEntity> candidates = this.accounts.findByIdIn(ids);
 		List<AccountEntity> listed = candidates.stream().filter((account) -> isListed(userId, account)).toList();
 		Set<UUID> listedIds = listed.stream().map(AccountEntity::getId).collect(Collectors.toSet());
 		Set<UUID> deleted = new LinkedHashSet<>();
 		candidates.stream().map(AccountEntity::getId).filter((id) -> !listedIds.contains(id)).forEach(deleted::add);
-		deleted.addAll(this.tombstones.deleted("account", List.of(userId), window));
+		tombstones.stream().filter((id) -> !listedIds.contains(id)).forEach(deleted::add);
 		return new SyncChanges<>(views(userId, listed), List.copyOf(deleted));
 	}
 
@@ -115,6 +119,7 @@ public class AccountService {
 	@Transactional
 	public AccountView create(UUID userId, AccountRequest request) {
 		if (request.id() != null) {
+			this.tombstones.requireNotDeleted("account", request.id());
 			Optional<AccountEntity> existing = this.accounts.findById(request.id());
 			if (existing.isPresent()) {
 				return replay(userId, existing.get());

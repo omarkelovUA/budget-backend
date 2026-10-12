@@ -4,9 +4,11 @@ import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import com.familybudget.common.exception.ApiException;
 import com.familybudget.common.model.SyncWindow;
 
 /**
@@ -21,6 +23,19 @@ public class SyncTombstones {
 
 	SyncTombstones(JdbcTemplate jdbc) {
 		this.jdbc = jdbc;
+	}
+
+	/**
+	 * For creates with a client id: a retry that arrives after the row was deleted must not
+	 * bring it back (and move a balance again). {@code 410 already-deleted} tells the client
+	 * to drop it.
+	 */
+	public void requireNotDeleted(String entity, UUID id) {
+		Boolean deleted = this.jdbc.queryForObject(
+				"select exists (select 1 from sync_tombstones where entity = ? and id = ?)", Boolean.class, entity, id);
+		if (Boolean.TRUE.equals(deleted)) {
+			throw new ApiException(HttpStatus.GONE, "already-deleted", "This was deleted in the meantime");
+		}
 	}
 
 	/** {@code entity} is the trigger's name for the table: account, category, transaction or budget. */

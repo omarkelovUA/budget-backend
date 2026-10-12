@@ -25,8 +25,8 @@ public record SyncChangesView(String cursor, boolean resetRequired, List<Account
 		Deleted deleted, @Nullable UserSettingsView settings, @Nullable FamilyView family,
 		@Nullable List<UUID> accountOrder, @Nullable List<UUID> categoryOrder) {
 
-	public static SyncChangesView reset(long cursor) {
-		return new SyncChangesView(Long.toString(cursor), true, List.of(), List.of(), List.of(), List.of(),
+	public static SyncChangesView reset(String cursor) {
+		return new SyncChangesView(cursor, true, List.of(), List.of(), List.of(), List.of(),
 				new Deleted(List.of(), List.of(), List.of(), List.of()), null, null, null, null);
 	}
 

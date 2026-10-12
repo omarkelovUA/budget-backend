@@ -513,9 +513,11 @@ is declared an *open* module since every feature uses it.
   - If that id already exists and the caller can see the row, the create returns it
     unchanged with the usual `201`, and nothing happens twice (no second balance move).
   - If the caller can't see it, the server answers `409 id-conflict`.
+  - If it existed but was deleted since, the server answers `410 already-deleted`, so a
+    late retry can't bring the row back (or move a balance again).
   - Without an `id`, the server generates one.
-  - The id in the response is authoritative: a category created with the name of a
-    family category merges into it and comes back with that category's id.
+  - A category whose name is already taken still gets `409 category-exists`. The client
+    maps its own id to the existing category.
 
 ### 5.4 Error handling
 
@@ -540,8 +542,8 @@ Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `transient-account`, `recipient-not-in-family`, `insufficient-in-transit`,
 `unsupported-language`, `invalid-used-currencies`, `default-currency-not-used`,
 `unsupported-theme`, `invalid-google-token`, `google-unavailable`,
-`google-link-confirmation-required`, `id-conflict`, `invalid-sync-cursor`,
-`validation-failed`.
+`google-link-confirmation-required`, `id-conflict`, `already-deleted`,
+`invalid-sync-cursor`, `validation-failed`.
 
 `detail` texts are English and meant for developers and logs; the backend has no
 `MessageSource`. Clients show their own, translated text keyed by the `type` slug (the
@@ -731,28 +733,38 @@ since that cursor.
     both families gets one.
   - `ACCOUNT_ORDER` and `CATEGORY_ORDER` when their custom order changed.
 
-**The cursor** is the horizon `pg_snapshot_xmin(pg_current_snapshot())`: the oldest
-transaction still running when the request is served. A window covers
-`since <= sync_txid < horizon`.
+**The cursor** is `<generation>.<horizon>`. The horizon is
+`pg_snapshot_xmin(pg_current_snapshot())`: the oldest transaction still running when the
+request is served. A window covers `since <= sync_txid < horizon`.
 - Every transaction below the horizon has finished, so no row stamped there can appear
   later.
 - A row written by a transaction still running is picked up by the next call.
 - A sequence or the largest txid seen would not be safe: a slow transaction could commit
   a lower number after the client had already moved past it.
+- Transaction ids belong to one PostgreSQL cluster. They start over in a cluster restored
+  from a `pg_dump`, so old cursors would skip changes there. `sync_generation` (V23) is
+  the generation part of the cursor: **bump it after every restore**
+  (`UPDATE sync_generation SET generation = generation + 1`), and every client downloads
+  everything again.
+- A session left open inside a transaction that has written something holds the horizon
+  back for everyone until it ends, so no change above it is delivered.
 
 **The answer.**
 - **`accounts`, `categories`, `transactions` and `budgets`:** rows changed in the window
   that the caller can see, in the same views as the list endpoints. Each module answers
   for its own tables (`*Service.changes`).
 - **`deleted`:** for each of those four, the tombstones in the caller's scope, plus
-  changed rows the caller no longer sees, such as an account its owner closed.
+  changed rows the caller no longer sees. Closing or deleting a shared account removes
+  its grants, so grantees get a reset instead.
 - **`settings`:** sent when the caller's `users` row changed.
 - **`family`:** sent when the family's row or a member's `users` row changed.
 - **`accountOrder` / `categoryOrder`:** sent when their marker is in the window.
 - **`resetRequired: true`:** comes with a fresh cursor and nothing else, in three cases:
   - `since` is missing (first sync)
   - a `RESET` marker for the caller falls in the window
-  - the window holds more than 1,000 changes (a long time offline)
+  - the window holds more than 1,000 changes (a long time offline). Each module first
+    counts its changed ids and tombstones against what's left of that budget, and only
+    then builds views.
 
   The app then downloads everything through the list endpoints and continues from that
   cursor.
@@ -761,8 +773,9 @@ transaction still running when the request is served. A window covers
 **Not covered.**
 - A budget's `factAmount` is correct when sent, but isn't re-sent when someone else's
   payment changes it. The app refreshes shared budgets online.
-- Family transfers aren't in the feed, and their creates take no client id: they're
-  online-only on mobile.
+- Transfers into and out of transient accounts are in `transactions`, but the transient
+  accounts and the in-transit view (`/family-transfers`) aren't in the feed. Their
+  creates take no client id: they're online-only on mobile.
 - Tombstones and markers aren't purged yet.
 
 ## 7. Explicit v1 simplifications (revisit later, not now)

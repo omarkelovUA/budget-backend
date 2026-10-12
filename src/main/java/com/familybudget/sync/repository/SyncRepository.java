@@ -29,6 +29,12 @@ public class SyncRepository {
 		return Long.parseLong(horizon);
 	}
 
+	/** Bumped after a restore from a dump, where transaction ids start over (V23). */
+	public int generation() {
+		Integer generation = this.jdbc.queryForObject("select generation from sync_generation", Integer.class);
+		return (generation != null) ? generation : 0;
+	}
+
 	/** The kinds of the user's markers in the window: RESET, ACCOUNT_ORDER, CATEGORY_ORDER. */
 	public Set<String> markers(UUID userId, SyncWindow window) {
 		return new HashSet<>(this.jdbc.queryForList(

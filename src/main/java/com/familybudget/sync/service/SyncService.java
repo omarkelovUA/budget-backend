@@ -63,46 +63,70 @@ public class SyncService {
 	}
 
 	public SyncChangesView changes(UUID userId, @Nullable String since) {
+		int generation = this.sync.generation();
 		long until = this.sync.horizon();
+		String cursor = generation + "." + until;
 		if (since == null) {
-			return SyncChangesView.reset(until);
+			return SyncChangesView.reset(cursor);
 		}
-		long from = parse(since);
-		if (from > until) {
-			return SyncChangesView.reset(until);
+		Cursor from = Cursor.parse(since);
+		if (from.generation() != generation || from.txid() > until) {
+			return SyncChangesView.reset(cursor);
 		}
-		SyncWindow window = new SyncWindow(from, until, MAX_CHANGES + 1);
+		SyncWindow window = new SyncWindow(from.txid(), until, MAX_CHANGES + 1);
 		Set<String> markers = this.sync.markers(userId, window);
 		if (markers.contains("RESET")) {
-			return SyncChangesView.reset(until);
+			return SyncChangesView.reset(cursor);
 		}
+		// Each module gets what's left of the budget, so a long time offline costs a few
+		// cheap id queries, not thousands of views that would be thrown away.
 		SyncChanges<AccountView> accounts = this.accountService.changes(userId, window);
-		SyncChanges<CategoryView> categories = this.categoryService.changes(userId, window);
-		SyncChanges<TransactionView> transactions = this.transactionService.changes(userId, window);
-		SyncChanges<BudgetView> budgets = this.budgetService.changes(userId, window);
-		if (accounts.size() + categories.size() + transactions.size() + budgets.size() > MAX_CHANGES) {
-			return SyncChangesView.reset(until);
+		if (accounts.overflow()) {
+			return SyncChangesView.reset(cursor);
 		}
-		return new SyncChangesView(Long.toString(until), false, accounts.changed(), categories.changed(),
-				transactions.changed(), budgets.changed(), new SyncChangesView.Deleted(accounts.deleted(),
-						categories.deleted(), transactions.deleted(), budgets.deleted()),
+		window = window.withLimit(window.limit() - accounts.size());
+		SyncChanges<CategoryView> categories = this.categoryService.changes(userId, window);
+		if (categories.overflow()) {
+			return SyncChangesView.reset(cursor);
+		}
+		window = window.withLimit(window.limit() - categories.size());
+		SyncChanges<TransactionView> transactions = this.transactionService.changes(userId, window);
+		if (transactions.overflow()) {
+			return SyncChangesView.reset(cursor);
+		}
+		window = window.withLimit(window.limit() - transactions.size());
+		SyncChanges<BudgetView> budgets = this.budgetService.changes(userId, window);
+		if (budgets.overflow()) {
+			return SyncChangesView.reset(cursor);
+		}
+		return new SyncChangesView(cursor, false, accounts.changed(), categories.changed(), transactions.changed(),
+				budgets.changed(), new SyncChangesView.Deleted(accounts.deleted(), categories.deleted(),
+						transactions.deleted(), budgets.deleted()),
 				this.userService.anyChangedIn(List.of(userId), window) ? this.userService.settings(userId) : null,
 				this.familyService.changedIn(userId, window) ? this.familyService.current(userId) : null,
 				markers.contains("ACCOUNT_ORDER") ? this.accountService.order(userId) : null,
 				markers.contains("CATEGORY_ORDER") ? this.categoryService.order(userId) : null);
 	}
 
-	private static long parse(String cursor) {
-		try {
-			long value = Long.parseLong(cursor);
-			if (value >= 0) {
-				return value;
+	/** {@code <generation>.<txid>}: the generation changes when the database is restored (V23). */
+	private record Cursor(int generation, long txid) {
+
+		static Cursor parse(String cursor) {
+			String[] parts = cursor.split("\\.", -1);
+			try {
+				if (parts.length == 2) {
+					Cursor parsed = new Cursor(Integer.parseInt(parts[0]), Long.parseLong(parts[1]));
+					if (parsed.generation() >= 0 && parsed.txid() >= 0) {
+						return parsed;
+					}
+				}
 			}
+			catch (NumberFormatException ex) {
+				// Falls through to the problem below.
+			}
+			throw new ApiException(HttpStatus.BAD_REQUEST, "invalid-sync-cursor", "Sync cursor is not valid");
 		}
-		catch (NumberFormatException ex) {
-			// Falls through to the problem below.
-		}
-		throw new ApiException(HttpStatus.BAD_REQUEST, "invalid-sync-cursor", "Sync cursor is not valid");
+
 	}
 
 }

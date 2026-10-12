@@ -122,6 +122,46 @@ class ClientIdFlowTests {
 		assertThat(this.api.account(alice, "Cash", "10")).isNotNull();
 	}
 
+	@Test
+	void replayAfterADeleteIsRefused() {
+		Session alice = TestUsers.register(this.mvc);
+		UUID account = TestApi.id(createAccount(alice, UUID.randomUUID(), "100"));
+		UUID category = this.api.category(alice, "expense", "Food-" + UUID.randomUUID(), "private");
+		UUID id = UUID.randomUUID();
+		String payment = """
+				{"id": "%s", "kind": "payment", "amount": 30, "date": "2026-10-05", "accountId": "%s", "categoryId": "%s"}
+				""".formatted(id, account, category);
+		assertThat(this.api.post(alice, "/api/v1/transactions", payment)).hasStatus(HttpStatus.CREATED);
+		assertThat(this.api.delete(alice, "/api/v1/transactions/{id}", id)).hasStatus(HttpStatus.NO_CONTENT);
+
+		MvcTestResult replay = this.api.post(alice, "/api/v1/transactions", payment);
+
+		assertThat(replay).hasStatus(HttpStatus.GONE);
+		assertThat(replay).bodyJson().extractingPath("$.type").isEqualTo(TestApi.PROBLEMS + "already-deleted");
+		assertThat(this.api.balance(alice, account)).isEqualByComparingTo(new BigDecimal("100"));
+	}
+
+	@Test
+	void someoneElsesTransactionAndBudgetIdsAreConflicts() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		UUID account = this.api.account(alice, "Card", "100");
+		UUID category = this.api.category(alice, "expense", "Food-" + UUID.randomUUID(), "private");
+		UUID payment = TestApi.id(this.api.pay(alice, account, category, "30", "2026-10-05"));
+		UUID budget = TestApi.id(this.api.post(alice, "/api/v1/budgets", """
+				{"categoryId": "%s", "period": "2026-10", "plannedAmount": 50, "visibility": "private"}
+				""".formatted(category)));
+		UUID bobsAccount = this.api.account(bob, "Card", "100");
+		UUID bobsCategory = this.api.category(bob, "expense", "Food-" + UUID.randomUUID(), "private");
+
+		assertThat(this.api.post(bob, "/api/v1/transactions", """
+				{"id": "%s", "kind": "payment", "amount": 1, "date": "2026-10-05", "accountId": "%s", "categoryId": "%s"}
+				""".formatted(payment, bobsAccount, bobsCategory))).hasStatus(HttpStatus.CONFLICT);
+		assertThat(this.api.post(bob, "/api/v1/budgets", """
+				{"id": "%s", "categoryId": "%s", "period": "2026-10", "plannedAmount": 5, "visibility": "private"}
+				""".formatted(budget, bobsCategory))).hasStatus(HttpStatus.CONFLICT);
+	}
+
 	private MvcTestResult createAccount(Session owner, UUID id, String balance) {
 		return this.api.post(owner, "/api/v1/accounts", """
 				{"id": "%s", "name": "Card", "balance": %s, "currency": "UAH", "icon": "card", "color": "green"}

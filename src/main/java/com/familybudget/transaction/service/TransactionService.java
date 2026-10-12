@@ -13,6 +13,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.domain.Page;
@@ -94,13 +95,14 @@ public class TransactionService {
 		if (accountIds.isEmpty()) {
 			return new SyncChanges<>(List.of(), List.of());
 		}
-		List<TransactionView> changed = toViews(userId, this.transactions.findByIdIn(
-				this.transactions.findChangedIds(accountIds, window.since(), window.until(), window.limit())));
-		List<UUID> changedIds = changed.stream().map(TransactionView::id).toList();
-		List<UUID> deleted = this.tombstones.deleted("transaction", accountIds, window)
-			.stream()
-			.filter((id) -> !changedIds.contains(id))
-			.toList();
+		List<UUID> ids = this.transactions.findChangedIds(accountIds, window.since(), window.until(), window.limit());
+		List<UUID> tombstones = this.tombstones.deleted("transaction", accountIds, window);
+		if (SyncChanges.exceeds(window, ids.size(), tombstones.size())) {
+			return SyncChanges.tooMany();
+		}
+		List<TransactionView> changed = toViews(userId, this.transactions.findByIdIn(ids));
+		Set<UUID> changedIds = changed.stream().map(TransactionView::id).collect(Collectors.toSet());
+		List<UUID> deleted = tombstones.stream().filter((id) -> !changedIds.contains(id)).toList();
 		return new SyncChanges<>(changed, deleted);
 	}
 
@@ -135,6 +137,7 @@ public class TransactionService {
 	@Transactional
 	public TransactionView create(UUID userId, TransactionRequest request) {
 		if (request.id() != null) {
+			this.tombstones.requireNotDeleted("transaction", request.id());
 			Optional<TransactionEntity> existing = this.transactions.findById(request.id());
 			if (existing.isPresent()) {
 				return replay(userId, existing.get());

@@ -4,9 +4,13 @@ import static com.familybudget.TestApi.PROBLEMS;
 import static com.familybudget.TestApi.shared;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+
+import javax.sql.DataSource;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,10 +36,13 @@ class SyncFlowTests {
 
 	private final TestApi api;
 
+	private final DataSource dataSource;
+
 	@Autowired
-	SyncFlowTests(MockMvcTester mvc, JdbcTemplate jdbc) {
+	SyncFlowTests(MockMvcTester mvc, JdbcTemplate jdbc, DataSource dataSource) {
 		this.mvc = mvc;
 		this.jdbc = jdbc;
+		this.dataSource = dataSource;
 		this.api = new TestApi(mvc, jdbc);
 	}
 
@@ -47,7 +54,7 @@ class SyncFlowTests {
 
 		assertThat(result).hasStatusOk();
 		assertThat(result).bodyJson().extractingPath("$.resetRequired").isEqualTo(true);
-		assertThat(TestUsers.json(result, "$.cursor")).containsOnlyDigits();
+		assertThat(TestUsers.json(result, "$.cursor")).matches("\\d+\\.\\d+");
 		assertThat(result).bodyJson().extractingPath("$.accounts").asArray().isEmpty();
 	}
 
@@ -96,7 +103,7 @@ class SyncFlowTests {
 	}
 
 	@Test
-	void closedSharedAccountLeavesTheGranteesFeed() {
+	void closedSharedAccountResetsTheGrantee() {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
@@ -106,11 +113,57 @@ class SyncFlowTests {
 
 		assertThat(this.api.closeAccount(alice, account, target)).hasStatusOk();
 
-		MvcTestResult result = changes(bob, cursor);
-		if (!Boolean.parseBoolean(TestUsers.json(result, "$.resetRequired"))) {
-			assertThat(result).bodyJson().extractingPath("$.deleted.accounts").asArray().contains(account.toString());
+		assertThat(changes(bob, cursor)).bodyJson().extractingPath("$.resetRequired").isEqualTo(true);
+	}
+
+	@Test
+	void deletedSharedAccountResetsTheGrantee() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		this.api.family(alice, bob);
+		UUID account = this.api.account(alice, "Joint", "0", shared(bob));
+		String cursor = start(bob);
+
+		assertThat(this.api.delete(alice, "/api/v1/accounts/{id}", account)).hasStatus(HttpStatus.NO_CONTENT);
+
+		assertThat(changes(bob, cursor)).bodyJson().extractingPath("$.resetRequired").isEqualTo(true);
+	}
+
+	/**
+	 * A transaction that started before the cursor was handed out but committed after it
+	 * must still reach the client: the cursor stops below every running transaction.
+	 */
+	@Test
+	void slowTransactionStillReachesTheClient() throws Exception {
+		Session alice = TestUsers.register(this.mvc);
+		UUID account = UUID.randomUUID();
+		String cursor;
+		try (Connection slow = this.dataSource.getConnection()) {
+			slow.setAutoCommit(false);
+			try (PreparedStatement insert = slow.prepareStatement("INSERT INTO accounts (id, owner_user_id, name,"
+					+ " balance, currency, icon, color, created_at) VALUES (?, ?, 'Slow', 0, 'UAH', 'card', 'green', now())")) {
+				insert.setObject(1, account);
+				insert.setObject(2, alice.userId());
+				insert.executeUpdate();
+			}
+			cursor = start(alice);
+			slow.commit();
 		}
-		assertThat(result).bodyJson().extractingPath("$.accounts[*].id").asArray().doesNotContain(account.toString());
+
+		assertThat(changes(alice, cursor)).bodyJson()
+			.extractingPath("$.accounts[*].id")
+			.asArray()
+			.contains(account.toString());
+	}
+
+	@Test
+	void newSyncGenerationResetsOldCursors() {
+		Session alice = TestUsers.register(this.mvc);
+		String cursor = start(alice);
+
+		this.jdbc.update("UPDATE sync_generation SET generation = generation + 1");
+
+		assertThat(changes(alice, cursor)).bodyJson().extractingPath("$.resetRequired").isEqualTo(true);
 	}
 
 	@Test
