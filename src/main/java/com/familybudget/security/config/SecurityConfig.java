@@ -59,7 +59,8 @@ import com.familybudget.user.service.UserService;
 class SecurityConfig {
 
 	private static final String[] AUTH_PATHS = { "/api/v1/auth/register", "/api/v1/auth/login",
-			"/api/v1/auth/refresh", "/api/v1/auth/logout", "/api/v1/auth/google/mobile" };
+			"/api/v1/auth/refresh", "/api/v1/auth/logout", "/api/v1/auth/google/mobile",
+			"/api/v1/auth/mobile/refresh", "/api/v1/auth/mobile/logout" };
 
 	@Bean
 	@Order(1)

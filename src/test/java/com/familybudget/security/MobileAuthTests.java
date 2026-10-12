@@ -3,12 +3,14 @@ package com.familybudget.security;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
@@ -27,6 +29,9 @@ class MobileAuthTests {
 
 	@Autowired
 	private MockMvcTester mvc;
+
+	@Autowired
+	private JdbcTemplate jdbc;
 
 	@Test
 	void newGoogleUserGetsBothTokensInTheBody() {
@@ -110,6 +115,62 @@ class MobileAuthTests {
 		assertThat(result).bodyJson().extractingPath("$.type").isEqualTo(TestApi.PROBLEMS + "validation-failed");
 	}
 
+	@Test
+	void mobileRefreshRotatesTheToken() {
+		String old = TestUsers.json(signIn(TestGoogleIdTokens.sign((claims) -> {
+		}), false), "$.refreshToken");
+
+		MvcTestResult refreshed = mobile("refresh", old);
+
+		assertThat(refreshed).hasStatusOk();
+		assertThat(TestUsers.json(refreshed, "$.refreshToken")).isNotEqualTo(old);
+		assertThat(refreshed.getResponse().getHeader(HttpHeaders.SET_COOKIE)).isNull();
+		assertThat(this.mvc.get()
+			.uri("/api/v1/users/me")
+			.header(HttpHeaders.AUTHORIZATION, "Bearer " + TestUsers.json(refreshed, "$.accessToken")))
+			.hasStatusOk();
+		MvcTestResult replayed = mobile("refresh", old);
+		assertThat(replayed).hasStatus(HttpStatus.UNAUTHORIZED);
+		assertThat(replayed).bodyJson().extractingPath("$.type").isEqualTo(TestApi.PROBLEMS + "invalid-refresh-token");
+	}
+
+	@Test
+	void replayingAnOldMobileTokenLaterRevokesAllSessions() {
+		MvcTestResult session = signIn(TestGoogleIdTokens.sign((claims) -> {
+		}), false);
+		String old = TestUsers.json(session, "$.refreshToken");
+		String rotated = TestUsers.json(mobile("refresh", old), "$.refreshToken");
+		this.jdbc.update("update refresh_tokens set revoked_at = now() - interval '1 hour' where user_id = ? and revoked_at is not null",
+				UUID.fromString(TestUsers.json(session, "$.user.id")));
+
+		assertThat(mobile("refresh", old)).hasStatus(HttpStatus.UNAUTHORIZED);
+		assertThat(mobile("refresh", rotated)).hasStatus(HttpStatus.UNAUTHORIZED);
+	}
+
+	@Test
+	void mobileLogoutRevokesTheToken() {
+		String token = TestUsers.json(signIn(TestGoogleIdTokens.sign((claims) -> {
+		}), false), "$.refreshToken");
+
+		MvcTestResult logout = mobile("logout", token);
+
+		assertThat(logout).hasStatus(HttpStatus.NO_CONTENT);
+		assertThat(logout.getResponse().getHeader(HttpHeaders.SET_COOKIE)).isNull();
+		assertThat(mobile("refresh", token)).hasStatus(HttpStatus.UNAUTHORIZED);
+	}
+
+	@Test
+	void mobileRefreshWithoutATokenIsAValidationError() {
+		MvcTestResult result = this.mvc.post()
+			.uri("/api/v1/auth/mobile/refresh")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{}")
+			.exchange();
+
+		assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+		assertThat(result).bodyJson().extractingPath("$.type").isEqualTo(TestApi.PROBLEMS + "validation-failed");
+	}
+
 	private MvcTestResult signIn(String idToken, boolean confirmLink, String... acceptLanguage) {
 		var request = this.mvc.post()
 			.uri("/api/v1/auth/google/mobile")
@@ -121,6 +182,16 @@ class MobileAuthTests {
 			request = request.header(HttpHeaders.ACCEPT_LANGUAGE, acceptLanguage);
 		}
 		return request.exchange();
+	}
+
+	private MvcTestResult mobile(String action, String refreshToken) {
+		return this.mvc.post()
+			.uri("/api/v1/auth/mobile/{action}", action)
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+					{"refreshToken": "%s"}
+					""".formatted(refreshToken))
+			.exchange();
 	}
 
 	private MvcTestResult passwordLogin(String email) {

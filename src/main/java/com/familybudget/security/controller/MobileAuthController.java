@@ -3,6 +3,7 @@ package com.familybudget.security.controller;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -48,7 +49,22 @@ class MobileAuthController {
 		return MobileAuthResponse.of(this.accessTokens.issue(user), this.refreshTokens.issue(user.id()));
 	}
 
+	@PostMapping("/api/v1/auth/mobile/refresh")
+	MobileAuthResponse refresh(@Valid @RequestBody RefreshRequest request) {
+		RefreshTokenService.Rotation rotation = this.refreshTokens.rotate(request.refreshToken());
+		return MobileAuthResponse.of(this.accessTokens.issue(this.userService.get(rotation.userId())), rotation.token());
+	}
+
+	@PostMapping("/api/v1/auth/mobile/logout")
+	ResponseEntity<Void> logout(@Valid @RequestBody RefreshRequest request) {
+		this.refreshTokens.revoke(request.refreshToken());
+		return ResponseEntity.noContent().build();
+	}
+
 	record GoogleMobileRequest(@NotBlank String idToken, boolean confirmLink) {
+	}
+
+	record RefreshRequest(@NotBlank String refreshToken) {
 	}
 
 }
