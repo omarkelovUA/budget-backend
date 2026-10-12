@@ -97,6 +97,11 @@ public class CategoryService {
 		return new SyncChanges<>(changed, deletedSince(scope, window, changed.stream().map(CategoryView::id).toList()));
 	}
 
+	/** Sync feed: the ids {@link #list} returns, in the user's order. */
+	public List<UUID> order(UUID userId) {
+		return list(userId).stream().map(CategoryView::id).toList();
+	}
+
 	/** The user's own order of the categories they see. */
 	@Transactional
 	public void reorder(UUID userId, List<UUID> ids) {

@@ -96,6 +96,11 @@ public class AccountService {
 		return new SyncChanges<>(views(userId, listed), List.copyOf(deleted));
 	}
 
+	/** Sync feed: the ids {@link #list} returns, in the user's order. */
+	public List<UUID> order(UUID userId) {
+		return list(userId, false).stream().map(AccountView::id).toList();
+	}
+
 	/** The user's own order of the open accounts they see. */
 	@Transactional
 	public void reorder(UUID userId, List<UUID> ids) {

@@ -10,7 +10,9 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
@@ -237,6 +239,116 @@ class SyncFlowTests {
 		assertThat(result).hasStatusOk();
 		assertThat(result.getResponse().getContentAsString()).doesNotContain(payment.toString())
 			.doesNotContain(account.toString());
+	}
+
+	@Test
+	void settingsChangeIsSent() throws Exception {
+		Session alice = TestUsers.register(this.mvc);
+		String dark = this.api.get(alice, "/api/v1/users/me/settings")
+			.getResponse()
+			.getContentAsString()
+			.replace("\"theme\":\"system\"", "\"theme\":\"dark\"");
+		String cursor = start(alice);
+
+		assertThat(this.api.put(alice, "/api/v1/users/me/settings", dark)).hasStatusOk();
+
+		MvcTestResult result = changes(alice, cursor);
+		assertThat(result).bodyJson().extractingPath("$.settings.theme").isEqualTo("dark");
+		assertThat(changes(alice, TestUsers.json(result, "$.cursor"))).bodyJson().doesNotHavePath("$.settings");
+	}
+
+	@Test
+	void familyRenameIsSent() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		this.api.family(alice, bob);
+		String alices = start(alice);
+		String bobs = start(bob);
+
+		assertThat(this.mvc.patch()
+			.uri("/api/v1/families/current")
+			.header(HttpHeaders.AUTHORIZATION, alice.bearer())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+					{"name": "Smiths"}
+					""")).hasStatusOk();
+
+		assertThat(changes(alice, alices)).bodyJson().extractingPath("$.family.name").isEqualTo("Smiths");
+		assertThat(changes(bob, bobs)).bodyJson().extractingPath("$.family.name").isEqualTo("Smiths");
+	}
+
+	@Test
+	void reorderSendsTheOrder() {
+		Session alice = TestUsers.register(this.mvc);
+		this.api.clearDefaults(alice);
+		UUID first = this.api.account(alice, "First", "0");
+		UUID second = this.api.account(alice, "Second", "0");
+		UUID food = this.api.category(alice, "expense", "Food", "private");
+		UUID rent = this.api.category(alice, "expense", "Rent", "private");
+		String cursor = start(alice);
+
+		assertThat(this.api.put(alice, "/api/v1/accounts/order", """
+				{"ids": ["%s", "%s"]}
+				""".formatted(second, first))).hasStatus(HttpStatus.NO_CONTENT);
+		assertThat(this.api.put(alice, "/api/v1/categories/order", """
+				{"ids": ["%s", "%s"]}
+				""".formatted(rent, food))).hasStatus(HttpStatus.NO_CONTENT);
+
+		MvcTestResult result = changes(alice, cursor);
+		assertThat(result).bodyJson()
+			.extractingPath("$.accountOrder")
+			.asArray()
+			.containsExactly(second.toString(), first.toString());
+		assertThat(result).bodyJson()
+			.extractingPath("$.categoryOrder")
+			.asArray()
+			.containsExactly(rent.toString(), food.toString());
+	}
+
+	@Test
+	void joiningAFamilyResetsEveryone() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		String alices = start(alice);
+		String bobs = start(bob);
+
+		this.api.family(alice, bob);
+
+		assertThat(changes(alice, alices)).bodyJson().extractingPath("$.resetRequired").isEqualTo(true);
+		assertThat(changes(bob, bobs)).bodyJson().extractingPath("$.resetRequired").isEqualTo(true);
+	}
+
+	@Test
+	void grantingAccessResetsTheGrantee() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		this.api.family(alice, bob);
+		UUID account = this.api.account(alice, "Joint", "0");
+		String alices = start(alice);
+		String bobs = start(bob);
+
+		assertThat(this.api.updateAccount(alice, account, "Joint", "0", shared(bob))).hasStatusOk();
+
+		assertThat(changes(bob, bobs)).bodyJson().extractingPath("$.resetRequired").isEqualTo(true);
+		assertThat(changes(alice, alices)).bodyJson().extractingPath("$.resetRequired").isEqualTo(false);
+	}
+
+	@Test
+	void editingASharedAccountWithoutChangingGrantsDoesNotReset() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		this.api.family(alice, bob);
+		UUID account = this.api.account(alice, "Joint", "0", shared(bob));
+		String bobs = start(bob);
+
+		assertThat(this.api.updateAccount(alice, account, "Joint renamed", "0", shared(bob))).hasStatusOk();
+
+		MvcTestResult result = changes(bob, bobs);
+		assertThat(result).bodyJson().extractingPath("$.resetRequired").isEqualTo(false);
+		assertThat(result).bodyJson()
+			.extractingPath("$.accounts[?(@.id == '%s')].name".formatted(account))
+			.asArray()
+			.containsExactly("Joint renamed");
 	}
 
 	/** The cursor a client starts from, right after its full download. */

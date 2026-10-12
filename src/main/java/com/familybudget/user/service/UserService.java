@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.familybudget.common.exception.ApiException;
 import com.familybudget.common.exception.NotFoundException;
+import com.familybudget.common.model.SyncWindow;
 import com.familybudget.user.entity.UserEntity;
 import com.familybudget.user.event.UserRegistered;
 import com.familybudget.user.event.UserSessionsInvalidated;
@@ -113,6 +114,11 @@ public class UserService {
 
 	public List<UserView> getAll(Collection<UUID> ids) {
 		return this.users.findAllById(ids).stream().map(UserEntity::toView).toList();
+	}
+
+	/** Sync feed (ARCHITECTURE.md §6.5): whether any of these users was written in {@code window}. */
+	public boolean anyChangedIn(Collection<UUID> ids, SyncWindow window) {
+		return !ids.isEmpty() && this.users.anyChanged(ids, window.since(), window.until());
 	}
 
 	public UserSettingsView settings(UUID id) {

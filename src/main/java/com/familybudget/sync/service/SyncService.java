@@ -1,5 +1,6 @@
 package com.familybudget.sync.service;
 
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -17,10 +18,12 @@ import com.familybudget.category.service.CategoryService;
 import com.familybudget.common.exception.ApiException;
 import com.familybudget.common.model.SyncChanges;
 import com.familybudget.common.model.SyncWindow;
+import com.familybudget.family.service.FamilyService;
 import com.familybudget.sync.model.SyncChangesView;
 import com.familybudget.sync.repository.SyncRepository;
 import com.familybudget.transaction.model.TransactionView;
 import com.familybudget.transaction.service.TransactionService;
+import com.familybudget.user.service.UserService;
 
 /**
  * Gathers what changed for a user between their cursor and the current horizon
@@ -43,13 +46,20 @@ public class SyncService {
 
 	private final BudgetService budgetService;
 
+	private final UserService userService;
+
+	private final FamilyService familyService;
+
 	SyncService(SyncRepository sync, AccountService accountService, CategoryService categoryService,
-			TransactionService transactionService, BudgetService budgetService) {
+			TransactionService transactionService, BudgetService budgetService, UserService userService,
+			FamilyService familyService) {
 		this.sync = sync;
 		this.accountService = accountService;
 		this.categoryService = categoryService;
 		this.transactionService = transactionService;
 		this.budgetService = budgetService;
+		this.userService = userService;
+		this.familyService = familyService;
 	}
 
 	public SyncChangesView changes(UUID userId, @Nullable String since) {
@@ -76,7 +86,10 @@ public class SyncService {
 		return new SyncChangesView(Long.toString(until), false, accounts.changed(), categories.changed(),
 				transactions.changed(), budgets.changed(), new SyncChangesView.Deleted(accounts.deleted(),
 						categories.deleted(), transactions.deleted(), budgets.deleted()),
-				null, null, null, null);
+				this.userService.anyChangedIn(List.of(userId), window) ? this.userService.settings(userId) : null,
+				this.familyService.changedIn(userId, window) ? this.familyService.current(userId) : null,
+				markers.contains("ACCOUNT_ORDER") ? this.accountService.order(userId) : null,
+				markers.contains("CATEGORY_ORDER") ? this.categoryService.order(userId) : null);
 	}
 
 	private static long parse(String cursor) {

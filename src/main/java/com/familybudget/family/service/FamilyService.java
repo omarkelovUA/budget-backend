@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.familybudget.common.exception.ApiException;
 import com.familybudget.common.exception.NotFoundException;
 import com.familybudget.common.model.AccessScope;
+import com.familybudget.common.model.SyncWindow;
 import com.familybudget.family.entity.FamilyEntity;
 import com.familybudget.family.entity.FamilyInvitationEntity;
 import com.familybudget.family.entity.FamilyJoinRequestEntity;
@@ -80,6 +81,18 @@ public class FamilyService {
 	/** The caller's family, used by later modules to scope shared data (ARCHITECTURE.md §6.3). */
 	public Optional<UUID> currentFamilyId(UUID userId) {
 		return this.members.findById(userId).map(FamilyMemberEntity::getFamilyId);
+	}
+
+	/**
+	 * Sync feed (ARCHITECTURE.md §6.5): whether the user's family view changed in
+	 * {@code window}: its name, or a member's name or email. Membership and roles change
+	 * through resets instead.
+	 */
+	public boolean changedIn(UUID userId, SyncWindow window) {
+		return currentFamilyId(userId)
+			.map((familyId) -> this.families.changed(familyId, window.since(), window.until())
+					|| this.userService.anyChangedIn(memberIds(familyId), window))
+			.orElse(false);
 	}
 
 	public Set<UUID> memberIds(UUID familyId) {
