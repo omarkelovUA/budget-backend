@@ -414,6 +414,11 @@ The Angular SPA (its stack, structure and auth handling) is described in the
   redirects back to the SPA's `/auth/callback` (§6.1).
 - It switches on the `ProblemDetail` `type`, not the HTTP status (§5.4), so problem types
   are part of the API contract.
+
+The Android app (planned, `budget-app-mobile`) is a second client. It signs in with Google
+only: it sends the ID token it got from Credential Manager to `POST /auth/google/mobile`
+and keeps both of our tokens itself, refreshing through `/auth/mobile/refresh` (§6.1,
+§6.2). Problem types reach it the same way.
 - In local dev `ng serve` proxies `/api`, `/oauth2` and `/login/oauth2` here, so the
   browser sees one origin — no CORS, and the refresh cookie (`Path=/api/v1/auth`,
   `SameSite=Strict`) behaves as in production (§6.4).
@@ -524,7 +529,8 @@ Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `account-closed`, `grantee-not-in-family`, `close-target-required`, `invalid-currency`,
 `transient-account`, `recipient-not-in-family`, `insufficient-in-transit`,
 `unsupported-language`, `invalid-used-currencies`, `default-currency-not-used`,
-`unsupported-theme`, `validation-failed`.
+`unsupported-theme`, `invalid-google-token`, `google-link-confirmation-required`,
+`validation-failed`.
 
 `detail` texts are English and meant for developers and logs; the backend has no
 `MessageSource`. Clients show their own, translated text keyed by the `type` slug (the
@@ -536,7 +542,7 @@ handlers, alongside the standard `WWW-Authenticate: Bearer …` header.
 
 ## 6. Security design
 
-### 6.1 Two login paths, one session model
+### 6.1 Three login paths, one session model
 
 ```mermaid
 sequenceDiagram
@@ -558,14 +564,20 @@ sequenceDiagram
         API-->>FE: redirect back to the SPA
         FE->>API: POST /api/v1/auth/refresh
         API-->>FE: access token (body)
+    else Mobile Google login (Android app)
+        FE->>IDP: Credential Manager sign-in (audience: our client ID)
+        IDP-->>FE: Google ID token
+        FE->>API: POST /api/v1/auth/google/mobile {idToken, confirmLink}
+        API->>API: verify signature (Google JWKS), iss, aud, exp; find-or-create User
+        API-->>FE: access token + refresh token (both in the body)
     end
 
     FE->>API: subsequent requests with "Authorization: Bearer <access>"
     API->>API: resource-server JWT support validates signature+expiry, loads auth context
 ```
 
-Both paths converge on the same backend-issued JWT — the rest of the API never has to
-know whether a session started via password or Google. This is the key simplification:
+All paths converge on the same backend-issued JWT — the rest of the API never has to
+know whether a session started via password, the web Google login or the mobile app. This is the key simplification:
 OAuth2 is a *login method*, not a parallel authorization system.
 
 The Google flow runs entirely on the backend (Spring's `oauth2Login`, backend as a
@@ -573,6 +585,13 @@ confidential client): the SPA never sees the authorization code or Google's toke
 login the backend only sets the refresh cookie and redirects to the SPA, which then
 obtains its access token through the normal `/auth/refresh` call — so the access token
 never travels in a URL.
+
+The mobile path has no redirect to come back to, so the app signs in with Google itself
+and the backend checks the resulting ID token (`GoogleIdTokenVerifier`): Google's
+signature (keys from `https://www.googleapis.com/oauth2/v3/certs`), issuer
+`https://accounts.google.com` or `accounts.google.com`, audience = our
+`GOOGLE_CLIENT_ID`, and expiry. A bad token gets `401 invalid-google-token`. There is no
+password sign-up or login from mobile.
 
 No hand-written JWT filter: tokens are issued with Spring Security's `NimbusJwtEncoder`
 and validated by its OAuth2 Resource Server support (`NimbusJwtDecoder`), signed with an
@@ -593,7 +612,10 @@ only changes those two beans.
   account, that account's password is removed and all of its sessions end as above.
   Whoever registered the address first, possibly not its owner, is locked out. The cost
   is that a genuine user who signed up with a password and later uses Google can only
-  sign in with Google from then on (there's no set-password flow yet).
+  sign in with Google from then on (there's no set-password flow yet). The web login
+  links straight away; the mobile app has to send `confirmLink: true`. Without it, an
+  email that matches an unlinked account gets `409 google-link-confirmation-required`
+  and nothing changes, so the app can warn the user first.
 - Longer-lived **refresh token** (30 days): an opaque random value, not a JWT, stored
   server-side only as a SHA-256 hash in `refresh_tokens`. Sent as an httpOnly + Secure +
   SameSite=Strict cookie scoped to `Path=/api/v1/auth`, so it only reaches the auth
@@ -602,6 +624,11 @@ only changes those two beans.
   more than 30 s ago (`reuse-grace`) it's treated as stolen and *all* of that user's
   refresh tokens are revoked; within the grace window (e.g. two tabs refreshing at once)
   it's just rejected, so the other tab's fresh token keeps working.
+- **Mobile tokens travel in the body**: the app has no cookie jar, so
+  `/auth/google/mobile` returns the refresh token in the JSON, and
+  `POST /auth/mobile/refresh` and `/auth/mobile/logout` take `{refreshToken}` in the body.
+  They never set a cookie. Rotation, reuse detection and expiry are the same as for the
+  cookie.
 - **Logout** revokes the presented refresh token in the database and clears the cookie.
   Its access token isn't denylisted — it simply expires within 15 min (only a session
   version bump ends access tokens early).
