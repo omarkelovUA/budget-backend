@@ -24,6 +24,12 @@ public interface CategoryRepository extends JpaRepository<CategoryEntity, UUID> 
 
 	List<CategoryEntity> findByIdIn(Collection<UUID> ids);
 
+	/** The user's and their family's categories, written within a sync window. */
+	@Query(nativeQuery = true, value = "select id from categories where (owner_id = :userId or owner_id = :familyId)"
+			+ " and sync_txid >= cast(cast(:since as text) as xid8) and sync_txid < cast(cast(:until as text) as xid8)"
+			+ " limit :limit")
+	List<UUID> findChangedIds(UUID userId, @Nullable UUID familyId, long since, long until, int limit);
+
 	List<CategoryEntity> findByOwnerTypeAndOwnerIdIn(OwnerType ownerType, Collection<UUID> ownerIds);
 
 	Optional<CategoryEntity> findFirstByOwnerTypeAndOwnerIdAndTypeAndName(OwnerType ownerType, UUID ownerId,

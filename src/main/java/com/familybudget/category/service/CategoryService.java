@@ -30,7 +30,10 @@ import com.familybudget.common.exception.IdConflictException;
 import com.familybudget.common.exception.NotFoundException;
 import com.familybudget.common.model.AccessScope;
 import com.familybudget.common.model.OwnerType;
+import com.familybudget.common.model.SyncChanges;
+import com.familybudget.common.model.SyncWindow;
 import com.familybudget.common.model.Visibility;
+import com.familybudget.common.service.SyncTombstones;
 import com.familybudget.common.service.UserOrder;
 import com.familybudget.family.service.FamilyService;
 import com.familybudget.user.model.UserView;
@@ -56,15 +59,18 @@ public class CategoryService {
 
 	private final UserOrder userOrder;
 
+	private final SyncTombstones tombstones;
+
 	private static final UserOrder.Table POSITIONS = new UserOrder.Table("category_positions", "category_id");
 
 	CategoryService(CategoryRepository categories, FamilyService familyService, UserService userService,
-			ApplicationEventPublisher events, UserOrder userOrder) {
+			ApplicationEventPublisher events, UserOrder userOrder, SyncTombstones tombstones) {
 		this.categories = categories;
 		this.familyService = familyService;
 		this.userService = userService;
 		this.events = events;
 		this.userOrder = userOrder;
+		this.tombstones = tombstones;
 	}
 
 	/** In the user's own order; new ones last, by type and name. */
@@ -73,6 +79,22 @@ public class CategoryService {
 			.stream()
 			.map(CategoryEntity::toView)
 			.toList();
+	}
+
+	/**
+	 * Sync feed (ARCHITECTURE.md §6.5): the user's and their family's categories written in
+	 * {@code window}. One moved out of their reach (hidden by the admin, merged) is deleted.
+	 */
+	public SyncChanges<CategoryView> changes(UUID userId, SyncWindow window) {
+		AccessScope scope = this.familyService.scopeFor(userId);
+		List<CategoryView> changed = this.categories
+			.findByIdIn(this.categories.findChangedIds(scope.userId(), scope.familyId(), window.since(), window.until(),
+					window.limit()))
+			.stream()
+			.filter((category) -> scope.canAccess(category.getOwnerType(), category.getOwnerId()))
+			.map(CategoryEntity::toView)
+			.toList();
+		return new SyncChanges<>(changed, deletedSince(scope, window, changed.stream().map(CategoryView::id).toList()));
 	}
 
 	/** The user's own order of the categories they see. */
@@ -254,6 +276,15 @@ public class CategoryService {
 		return this.categories.findByIdIn(ids)
 			.stream()
 			.collect(Collectors.toMap(CategoryEntity::getId, CategoryEntity::toView, (a, b) -> a));
+	}
+
+	private List<UUID> deletedSince(AccessScope scope, SyncWindow window, List<UUID> changed) {
+		List<UUID> ownerIds = (scope.familyId() != null) ? List.of(scope.userId(), scope.familyId())
+				: List.of(scope.userId());
+		return this.tombstones.deleted("category", ownerIds, window)
+			.stream()
+			.filter((id) -> !changed.contains(id))
+			.toList();
 	}
 
 	/** A create sent again with the same client id returns what the first one made. */

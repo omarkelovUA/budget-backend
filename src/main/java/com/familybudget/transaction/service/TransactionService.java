@@ -34,6 +34,9 @@ import com.familybudget.common.exception.IdConflictException;
 import com.familybudget.common.exception.NotFoundException;
 import com.familybudget.common.model.AccessScope;
 import com.familybudget.common.model.PageView;
+import com.familybudget.common.model.SyncChanges;
+import com.familybudget.common.model.SyncWindow;
+import com.familybudget.common.service.SyncTombstones;
 import com.familybudget.family.service.FamilyService;
 import com.familybudget.transaction.entity.TransactionEntity;
 import com.familybudget.transaction.model.MonthSummaryView;
@@ -60,12 +63,15 @@ public class TransactionService {
 
 	private final FamilyService familyService;
 
+	private final SyncTombstones tombstones;
+
 	TransactionService(TransactionRepository transactions, AccountService accountService,
-			CategoryService categoryService, FamilyService familyService) {
+			CategoryService categoryService, FamilyService familyService, SyncTombstones tombstones) {
 		this.transactions = transactions;
 		this.accountService = accountService;
 		this.categoryService = categoryService;
 		this.familyService = familyService;
+		this.tombstones = tombstones;
 	}
 
 	public PageView<TransactionView> list(UUID userId, @Nullable UUID accountId, int page, int size) {
@@ -77,6 +83,25 @@ public class TransactionService {
 		}
 		return PageView.of(this.transactions.findTouching(accountIds, pageRequest),
 				(entities) -> toViews(userId, entities));
+	}
+
+	/**
+	 * Sync feed (ARCHITECTURE.md §6.5): transactions on the accounts the user can see,
+	 * written in {@code window}, as {@link #list} shows them.
+	 */
+	public SyncChanges<TransactionView> changes(UUID userId, SyncWindow window) {
+		List<UUID> accountIds = this.accountService.viewableIds(userId);
+		if (accountIds.isEmpty()) {
+			return new SyncChanges<>(List.of(), List.of());
+		}
+		List<TransactionView> changed = toViews(userId, this.transactions.findByIdIn(
+				this.transactions.findChangedIds(accountIds, window.since(), window.until(), window.limit())));
+		List<UUID> changedIds = changed.stream().map(TransactionView::id).toList();
+		List<UUID> deleted = this.tombstones.deleted("transaction", accountIds, window)
+			.stream()
+			.filter((id) -> !changedIds.contains(id))
+			.toList();
+		return new SyncChanges<>(changed, deleted);
 	}
 
 	/**

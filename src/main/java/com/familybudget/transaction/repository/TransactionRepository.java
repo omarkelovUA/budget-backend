@@ -20,6 +20,15 @@ public interface TransactionRepository extends JpaRepository<TransactionEntity, 
 			+ " where t.accountId in :accountIds or t.fromAccountId in :accountIds or t.toAccountId in :accountIds")
 	Page<TransactionEntity> findTouching(Collection<UUID> accountIds, Pageable pageable);
 
+	/** Transactions touching any of the accounts, written within a sync window. */
+	@Query(nativeQuery = true, value = "select id from transactions"
+			+ " where (account_id in :accountIds or from_account_id in :accountIds or to_account_id in :accountIds)"
+			+ " and sync_txid >= cast(cast(:since as text) as xid8) and sync_txid < cast(cast(:until as text) as xid8)"
+			+ " limit :limit")
+	List<UUID> findChangedIds(Collection<UUID> accountIds, long since, long until, int limit);
+
+	List<TransactionEntity> findByIdIn(Collection<UUID> ids);
+
 	/** Payment totals per (account, category) in a date range: rows of [accountId, categoryId, sum]. */
 	@Query("select t.accountId, t.categoryId, sum(t.amount) from TransactionEntity t"
 			+ " where t.kind = com.familybudget.transaction.model.TransactionKind.PAYMENT and t.accountId in :accountIds"

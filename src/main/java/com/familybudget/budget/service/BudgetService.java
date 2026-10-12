@@ -24,7 +24,10 @@ import com.familybudget.common.exception.IdConflictException;
 import com.familybudget.common.exception.NotFoundException;
 import com.familybudget.common.model.AccessScope;
 import com.familybudget.common.model.OwnerType;
+import com.familybudget.common.model.SyncChanges;
+import com.familybudget.common.model.SyncWindow;
 import com.familybudget.common.model.Visibility;
+import com.familybudget.common.service.SyncTombstones;
 import com.familybudget.family.service.FamilyService;
 import com.familybudget.transaction.service.TransactionService;
 
@@ -45,12 +48,15 @@ public class BudgetService {
 
 	private final FamilyService familyService;
 
+	private final SyncTombstones tombstones;
+
 	BudgetService(BudgetRepository budgets, CategoryService categoryService, TransactionService transactionService,
-			FamilyService familyService) {
+			FamilyService familyService, SyncTombstones tombstones) {
 		this.budgets = budgets;
 		this.categoryService = categoryService;
 		this.transactionService = transactionService;
 		this.familyService = familyService;
+		this.tombstones = tombstones;
 	}
 
 	public List<BudgetView> list(UUID userId, @Nullable YearMonth period) {
@@ -62,6 +68,32 @@ public class BudgetService {
 		Map<UUID, CategoryView> categories = this.categoryService
 			.views(visible.stream().map(BudgetEntity::getCategoryId).toList());
 		return visible.stream().map((budget) -> toView(budget, categories.get(budget.getCategoryId()))).toList();
+	}
+
+	/**
+	 * Sync feed (ARCHITECTURE.md §6.5): the user's and their family's budgets written in
+	 * {@code window}. {@code factAmount} is as of now; other members' payments don't resend it.
+	 */
+	public SyncChanges<BudgetView> changes(UUID userId, SyncWindow window) {
+		AccessScope scope = this.familyService.scopeFor(userId);
+		List<BudgetEntity> changed = this.budgets
+			.findByIdIn(this.budgets.findChangedIds(scope.userId(), scope.familyId(), window.since(), window.until(),
+					window.limit()))
+			.stream()
+			.filter((budget) -> scope.canAccess(budget.getOwnerType(), budget.getOwnerId()))
+			.toList();
+		Map<UUID, CategoryView> categories = this.categoryService
+			.views(changed.stream().map(BudgetEntity::getCategoryId).toList());
+		List<UUID> changedIds = changed.stream().map(BudgetEntity::getId).toList();
+		List<UUID> ownerIds = (scope.familyId() != null) ? List.of(scope.userId(), scope.familyId())
+				: List.of(scope.userId());
+		List<UUID> deleted = this.tombstones.deleted("budget", ownerIds, window)
+			.stream()
+			.filter((id) -> !changedIds.contains(id))
+			.toList();
+		return new SyncChanges<>(
+				changed.stream().map((budget) -> toView(budget, categories.get(budget.getCategoryId()))).toList(),
+				deleted);
 	}
 
 	@Transactional

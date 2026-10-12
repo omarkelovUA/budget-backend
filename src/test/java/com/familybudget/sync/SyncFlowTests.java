@@ -149,6 +149,96 @@ class SyncFlowTests {
 		assertThat(changes(alice, cursor)).bodyJson().extractingPath("$.resetRequired").isEqualTo(true);
 	}
 
+	@Test
+	void newCategoryTransactionAndBudgetAppear() {
+		Session alice = TestUsers.register(this.mvc);
+		String cursor = start(alice);
+		UUID account = this.api.account(alice, "Card", "100");
+		UUID category = this.api.category(alice, "expense", "Food-" + UUID.randomUUID(), "private");
+		UUID payment = TestApi.id(this.api.pay(alice, account, category, "30", "2026-10-05"));
+		UUID budget = TestApi.id(this.api.post(alice, "/api/v1/budgets", """
+				{"categoryId": "%s", "period": "2026-10", "plannedAmount": 50, "visibility": "private"}
+				""".formatted(category)));
+
+		MvcTestResult result = changes(alice, cursor);
+
+		assertThat(result).bodyJson().extractingPath("$.categories[*].id").asArray().contains(category.toString());
+		assertThat(result).bodyJson().extractingPath("$.transactions[*].id").asArray().contains(payment.toString());
+		assertThat(result).bodyJson().extractingPath("$.budgets[*].id").asArray().contains(budget.toString());
+		assertThat(result).bodyJson().extractingPath("$.accounts[*].id").asArray().contains(account.toString());
+	}
+
+	@Test
+	void deletedTransactionIsReportedAndTheBalanceRestored() {
+		Session alice = TestUsers.register(this.mvc);
+		UUID account = this.api.account(alice, "Card", "100");
+		UUID category = this.api.category(alice, "expense", "Food-" + UUID.randomUUID(), "private");
+		UUID payment = TestApi.id(this.api.pay(alice, account, category, "30", "2026-10-05"));
+		String cursor = start(alice);
+
+		assertThat(this.api.delete(alice, "/api/v1/transactions/{id}", payment)).hasStatus(HttpStatus.NO_CONTENT);
+
+		MvcTestResult result = changes(alice, cursor);
+		assertThat(result).bodyJson().extractingPath("$.deleted.transactions").asArray().contains(payment.toString());
+		assertThat(result).bodyJson()
+			.extractingPath("$.accounts[?(@.id == '%s')].balance".formatted(account))
+			.asArray()
+			.containsExactly(100.0);
+	}
+
+	@Test
+	void hiddenFamilyCategoryLeavesTheMembersFeed() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		this.api.family(alice, bob);
+		UUID category = this.api.category(bob, "expense", "Hobby-" + UUID.randomUUID(), "shared");
+		String alices = start(alice);
+		String bobs = start(bob);
+
+		assertThat(this.api.postEmpty(alice, "/api/v1/categories/{id}/hide", category)).hasStatusOk();
+
+		assertThat(changes(alice, alices)).bodyJson()
+			.extractingPath("$.categories[*].id")
+			.asArray()
+			.contains(category.toString());
+		assertThat(changes(bob, bobs)).bodyJson()
+			.extractingPath("$.deleted.categories")
+			.asArray()
+			.contains(category.toString());
+	}
+
+	@Test
+	void deletedCategoryIsReported() {
+		Session alice = TestUsers.register(this.mvc);
+		UUID category = this.api.category(alice, "expense", "Gone-" + UUID.randomUUID(), "private");
+		String cursor = start(alice);
+
+		assertThat(this.api.delete(alice, "/api/v1/categories/{id}", category)).hasStatus(HttpStatus.NO_CONTENT);
+
+		assertThat(changes(alice, cursor)).bodyJson()
+			.extractingPath("$.deleted.categories")
+			.asArray()
+			.contains(category.toString());
+	}
+
+	@Test
+	void othersPrivatePaymentsNeverAppear() throws Exception {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		this.api.family(alice, bob);
+		UUID account = this.api.account(bob, "Mine", "100");
+		UUID category = this.api.category(bob, "expense", "Food-" + UUID.randomUUID(), "private");
+		String cursor = start(alice);
+		UUID payment = TestApi.id(this.api.pay(bob, account, category, "30", "2026-10-05"));
+		assertThat(this.api.delete(bob, "/api/v1/transactions/{id}", payment)).hasStatus(HttpStatus.NO_CONTENT);
+
+		MvcTestResult result = changes(alice, cursor);
+
+		assertThat(result).hasStatusOk();
+		assertThat(result.getResponse().getContentAsString()).doesNotContain(payment.toString())
+			.doesNotContain(account.toString());
+	}
+
 	/** The cursor a client starts from, right after its full download. */
 	private String start(Session session) {
 		MvcTestResult result = this.api.get(session, "/api/v1/sync/changes");

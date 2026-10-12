@@ -1,5 +1,6 @@
 package com.familybudget.budget.repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -17,6 +18,14 @@ public interface BudgetRepository extends JpaRepository<BudgetEntity, UUID> {
 			+ " or (b.ownerType = com.familybudget.common.model.OwnerType.FAMILY and b.ownerId = :familyId))"
 			+ " order by b.period desc, b.createdAt")
 	List<BudgetEntity> findVisible(UUID userId, @Nullable UUID familyId);
+
+	/** The user's and their family's budgets, written within a sync window. */
+	@Query(nativeQuery = true, value = "select id from budgets where (owner_id = :userId or owner_id = :familyId)"
+			+ " and sync_txid >= cast(cast(:since as text) as xid8) and sync_txid < cast(cast(:until as text) as xid8)"
+			+ " limit :limit")
+	List<UUID> findChangedIds(UUID userId, @Nullable UUID familyId, long since, long until, int limit);
+
+	List<BudgetEntity> findByIdIn(Collection<UUID> ids);
 
 	/** Budgets on the category other than {@code userId}'s own personal ones. */
 	@Query(nativeQuery = true, value = "select exists (select 1 from budgets where category_id = :categoryId"
