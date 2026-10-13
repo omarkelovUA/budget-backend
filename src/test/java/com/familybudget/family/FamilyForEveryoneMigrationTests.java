@@ -17,7 +17,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * V18 backfill (PLAN.md M19): runs the migrations up to V17 on its own database, inserts
+ * V18 backfill (ARCHITECTURE §3.2): runs the migrations up to V17 on its own database, inserts
  * users with and without a family, then applies V18.
  */
 @Testcontainers

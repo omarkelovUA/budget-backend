@@ -12,7 +12,7 @@ import com.familybudget.user.service.UserService;
 
 /**
  * Someone joining a family gets transient accounts with every other member, both ways,
- * each in the sender's default currency (PLAN.md M14). Other currencies appear on demand.
+ * each in the sender's default currency (ARCHITECTURE §3.2). Other currencies appear on demand.
  */
 @Component
 public class TransientAccountSetup {

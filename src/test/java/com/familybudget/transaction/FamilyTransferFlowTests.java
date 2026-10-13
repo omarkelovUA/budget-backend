@@ -21,7 +21,7 @@ import com.familybudget.TestUsers;
 import com.familybudget.TestUsers.Session;
 import com.familybudget.transaction.service.FamilyTransferService;
 
-/** Money between family members through transient accounts (PLAN.md M14). */
+/** Money between family members through transient accounts (ARCHITECTURE §3.2). */
 @IntegrationTest
 class FamilyTransferFlowTests {
 

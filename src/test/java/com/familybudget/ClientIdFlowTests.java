@@ -15,7 +15,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import com.familybudget.TestUsers.Session;
 
 /**
- * Creates with a client-generated id (mobile sync, PLAN.md M29): the id is kept, and
+ * Creates with a client-generated id (mobile sync, ARCHITECTURE §6.5): the id is kept, and
  * sending the same create again returns the row instead of making a second one.
  */
 @IntegrationTest

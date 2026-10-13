@@ -4,8 +4,7 @@ REST API for Family Budget: private and family-shared accounts, categories, tran
 and monthly budgets. Spring Boot 4.1 / Java 25 modular monolith on PostgreSQL 18.
 
 - Frontend: [`budget-front`](https://github.com/omarkelovUA/budget-front) (Angular 22)
-- Design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); roadmap: `.docs/PLAN.md` in the
-  workspace folder that holds both repos (not versioned)
+- Design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 ## Quick start (Docker only)
 
@@ -70,8 +69,57 @@ All optional for local use; the defaults work out of the box.
 `deploy/` holds the production stack for one Docker host: `compose.yaml` (Caddy + SPA,
 this API, Postgres), `.env.example`, `deploy.sh` and `backup.sh`. A push to `main` runs
 the tests, pushes the image to GHCR and deploys it over SSH (`.github/workflows/ci.yml`).
-The VM setup is in the workspace's `.docs/prod_deployment.md`; the topology is in
-ARCHITECTURE.md §6.4.
+The topology is in ARCHITECTURE.md §6.4.
+
+### Setting up the VM (once)
+1. **VM:** Azure Ubuntu 24.04, `Standard_B2s` (2 GB is too tight), SSH keys only, a
+   static public IP. Open 22, 80, 443 (optionally 443/udp); keep 5432 and 8080 closed.
+   ```bash
+   az group create -n familybudget-rg -l westeurope
+   az vm create -g familybudget-rg -n familybudget-vm --image Ubuntu2404 --size Standard_B2s \
+     --admin-username azureuser --ssh-key-values ~/.ssh/id_ed25519.pub \
+     --public-ip-sku Standard --public-ip-address-dns-name familybudget
+   az vm open-port -g familybudget-rg -n familybudget-vm --port 80,443 --priority 1010
+   ```
+2. **DNS:** an `A` record for `<domain>` → the VM's IP (or the free
+   `familybudget.<region>.cloudapp.azure.com`). `dig +short <domain>` must return the IP
+   before Caddy's first start.
+3. **Server:** `apt full-upgrade`, `unattended-upgrades`, `fail2ban`; Docker from
+   `curl -fsSL https://get.docker.com | sudo sh`; `/etc/docker/daemon.json` =
+   `{ "log-driver": "local" }`. A `deploy` user in the `docker` group with its own SSH key
+   owning `/opt/familybudget/backups`. As `deploy`, `docker login ghcr.io` with a classic
+   PAT that has only `read:packages`.
+4. **Secrets:** copy `deploy/*` and `deploy/.env.example` to `/opt/familybudget`, then
+   `.env.example` → `.env` (`chmod 600`). `POSTGRES_PASSWORD` from
+   `openssl rand -base64 32`, `JWT_SECRET` from `openssl rand -base64 48`. Changing the
+   DB password later needs `ALTER USER` too.
+5. **Google:** in the OAuth client add the origin `https://<domain>` and the redirect URI
+   `https://<domain>/login/oauth2/code/google`; add `<domain>` to the consent screen's
+   authorized domains and publish the app (in *Testing* only test users can sign in).
+6. **GitHub (both repos):** environment `production`, secrets `DEPLOY_SSH_KEY` and
+   `DEPLOY_KNOWN_HOSTS` (`ssh-keyscan -t ed25519 <domain>`), variable `DOMAIN`.
+7. **First deploy:** push backend `main` (its smoke test fails once, since `web` doesn't
+   exist yet), then frontend `main`, then re-run the backend's `deploy` job. Check:
+   `http://` redirects to `https://`, `/actuator/health` is `UP`, a deep link reloads,
+   Google sign-in works, the `refresh_token` cookie is `Secure; HttpOnly; SameSite=Strict`.
+8. **Backups:** as `deploy`, cron
+   `15 3 * * * bash /opt/familybudget/backup.sh >> /opt/familybudget/backups/backup.log 2>&1`,
+   and set `BACKUP_CONTAINER_URL` (an Azure Blob container SAS with create + write) so
+   dumps leave the VM. Test a restore once into a scratch DB with `pg_restore`. After a
+   real restore, bump `sync_generation` so the phones download everything again.
+
+Releases: backend `main` first, wait for its deploy, then frontend `main`
+(`git checkout main && git merge --ff-only dev && git push && git checkout dev`).
+Rollback: `bash /opt/familybudget/deploy.sh api <previous-sha>`; across a Flyway
+migration it needs a restore. Logs: `docker compose logs -f --tail=200 api`.
+
+| Symptom | Fix |
+|---|---|
+| Google `redirect_uri_mismatch` with `http://...` | `SERVER_FORWARD_HEADERS_STRATEGY=native` is missing on `api` |
+| Google `redirect_uri_mismatch` with `https://...` | That exact URI isn't in the OAuth client (trailing slash, `www`) |
+| Logged out on every reload | Not on HTTPS, or the SPA is opened from another origin |
+| Caddy `challenge failed` | DNS or ports 80/443 not ready; fix, then `docker compose restart web` (don't loop: rate limits) |
+| `denied` pulling images | The VM's `docker login ghcr.io` token is missing or expired |
 
 ## API overview
 

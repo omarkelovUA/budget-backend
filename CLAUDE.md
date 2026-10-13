@@ -1,7 +1,7 @@
 # Family Budget: backend
 
 This is the backend repo. The frontend lives in `../budget-app-front/`, and the plans, which
-aren't versioned, are in `../.docs/` (`PLAN.md` plus one file per feature). Before you start
+aren't versioned, are in `../.docs/` (one file per feature in progress). Before you start
 work here, load the `backend` skill (`.claude/skills/backend/SKILL.md`).
 
 ## Rules
@@ -10,7 +10,8 @@ work here, load the `backend` skill (`.claude/skills/backend/SKILL.md`).
   speculative abstractions.
 - Every change ships with tests. Both suites must be green before you say it's done.
 - Start a feature with its plan in `../.docs/<feature>.md`, as a checkbox list. Tick each box
-  once that point is implemented. Then add a milestone entry to `../.docs/PLAN.md`.
+  once that point is implemented. When it's done, move what lasts into the repos'
+  `docs/ARCHITECTURE.md` and delete the plan.
 - When behavior or the API changes, update both repos' `docs/ARCHITECTURE.md`.
 - Git: both repos work on `dev`. Commit per repo; push only when asked. The `gh` CLI
   isn't installed.

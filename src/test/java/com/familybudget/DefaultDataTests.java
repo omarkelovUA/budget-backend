@@ -13,7 +13,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 import com.familybudget.TestUsers.Session;
 
-/** What a new user starts with (PLAN.md M21): common accounts and categories in their language. */
+/** What a new user starts with (ARCHITECTURE §3.2): common accounts and categories in their language. */
 @IntegrationTest
 class DefaultDataTests {
 

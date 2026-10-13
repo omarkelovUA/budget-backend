@@ -18,7 +18,7 @@ import com.familybudget.TestUsers.Session;
 
 /**
  * Language and default currency from the sign-up region, then editable in settings along
- * with the used currencies (PLAN.md M13, M15).
+ * with the used currencies (ARCHITECTURE §3.2).
  */
 @IntegrationTest
 class UserSettingsTests {

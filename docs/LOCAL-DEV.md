@@ -149,6 +149,13 @@ Works only with your own Google OAuth client (everything else works without it):
 
 3. On the login page click *Увійти через Google*.
 
+On the OAuth consent screen (type *External*, scopes `openid email profile`), add every
+Google account you'll sign in with as a **test user**, e.g. a second one for family
+invitations; while the app is in *Testing*, Google blocks everyone else
+(`access_denied`). `invalid_client` means the backend still has the placeholder client
+id; `redirect_uri_mismatch` means the URI isn't registered exactly, with no trailing
+slash.
+
 ## 8. Stopping and resetting
 
 - Stop: `Ctrl+C` in both terminals (Postgres stops with the backend).

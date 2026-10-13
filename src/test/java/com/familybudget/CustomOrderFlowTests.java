@@ -17,7 +17,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 import com.familybudget.TestUsers.Session;
 
-/** Each user's own order of the accounts and categories they see (PLAN.md M24). */
+/** Each user's own order of the accounts and categories they see (ARCHITECTURE §3.2). */
 @IntegrationTest
 class CustomOrderFlowTests {
 

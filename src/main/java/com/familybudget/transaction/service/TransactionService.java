@@ -268,7 +268,7 @@ public class TransactionService {
 
 	/**
 	 * Shared access (or ownership) on every open account it touches, and the caller recorded
-	 * it or owns one of those accounts (PLAN.md open decision #7).
+	 * it or owns one of those accounts (ARCHITECTURE §3.2).
 	 */
 	private static boolean isEditable(TransactionEntity transaction, Collection<AccountRef> accounts, UUID userId) {
 		boolean usable = accounts.size() == transaction.accountIds().size() && accounts.stream()

@@ -1,7 +1,6 @@
 # Family Budget — Architecture
 
 Status: draft v0.13 · 2026-10-07
-Companion doc: [PLAN.md](../../.docs/PLAN.md) (workspace `.docs/`) (roadmap, phases, open decisions)
 Frontend (Angular SPA): [frontend ARCHITECTURE.md][frontend-arch]
 
 [frontend-arch]: https://github.com/omarkelovUA/budget-front/blob/main/docs/ARCHITECTURE.md
@@ -18,7 +17,7 @@ private. A user can:
 
 This document describes the system as a whole and the backend: domain model, REST API,
 security and backend structure. It is intentionally stack-accurate but
-implementation-light — concrete code arrives phase by phase per [PLAN.md](../../.docs/PLAN.md).
+implementation-light.
 The Angular SPA has its own [frontend ARCHITECTURE.md][frontend-arch]; §4 lists only what
 the backend expects from it.
 
@@ -713,8 +712,8 @@ only changes those two beans.
   also pushes its image to GHCR (`ghcr.io/omarkelovua/budget-backend|budget-front`,
   tagged with the commit SHA and `latest`). It then SSHes to the host as `deploy`, runs
   `deploy/deploy.sh <api|web> <sha>` and smoke-tests `/actuator/health` (or `/`).
-  Rollback is `deploy.sh` with an older SHA. The step-by-step setup is in the
-  workspace's `.docs/prod_deployment.md`.
+  Rollback is `deploy.sh` with an older SHA. The step-by-step VM setup is in the
+  README's *Production* section.
 
 ### 6.5 Mobile sync
 
@@ -795,6 +794,8 @@ request is served. A window covers `since <= sync_txid < horizon`.
 - `Budget.factAmount` is computed on read (one aggregate query per budget) instead of
   cached — always correct, cheap at v1 volumes; cache it only if budget lists get slow.
 - Transactions are create/delete only; no in-place edits.
+- Closed accounts can't be reopened, and an account's ownership can't be handed to
+  another member; an owner who leaves the family keeps their accounts.
 
 ## 8. Key decisions & why
 
@@ -811,5 +812,11 @@ request is served. A window covers `since <= sync_txid < horizon`.
 
 ## 9. Open questions
 
-Tracked with owners/status in [PLAN.md §Open decisions](../../.docs/PLAN.md#open-decisions) —
-not repeated here to avoid the two docs drifting out of sync.
+- Purge old sync tombstones and markers (§6.5).
+- The write-off category "Перекази в сім'ї" is found by name; translating it needs a
+  `system_key` column so a rename per language doesn't create duplicates.
+- No email is sent for invitations or join requests; the invitee sees them after
+  signing in.
+- Not yet checked by hand: a real Google sign-in from the web and the phone, and the
+  two-user run-through (invite, accept, share an account, record, transfers, close).
+- The production VM isn't set up yet (README *Production*).

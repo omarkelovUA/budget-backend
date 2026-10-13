@@ -18,7 +18,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * V22 change tracking for mobile sync (PLAN.md M29): runs the migrations up to V21 on its
+ * V22 change tracking for mobile sync (ARCHITECTURE §6.5): runs the migrations up to V21 on its
  * own database, inserts a family with an account, a category and a payment, then applies
  * V22.
  */

@@ -17,7 +17,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * V15 backfill (PLAN.md M15): runs the migrations up to V14 on its own database, inserts
+ * V15 backfill (ARCHITECTURE §3.2): runs the migrations up to V14 on its own database, inserts
  * users with accounts, then applies V15.
  */
 @Testcontainers

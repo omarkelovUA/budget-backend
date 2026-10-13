@@ -18,7 +18,7 @@ import com.familybudget.common.exception.ApiException;
 import com.familybudget.common.exception.NotFoundException;
 
 /**
- * A user's own order of the accounts or categories they see (PLAN.md M24). Each module
+ * A user's own order of the accounts or categories they see (ARCHITECTURE §3.2). Each module
  * keeps it in its own table of (user_id, item, position); this reads, replaces and applies
  * it.
  */

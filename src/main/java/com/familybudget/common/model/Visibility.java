@@ -3,7 +3,7 @@ package com.familybudget.common.model;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
- * The wire-level view of ownership (PLAN.md open decision #2): the frontend only sees
+ * The wire-level view of ownership (ARCHITECTURE §3.3): the frontend only sees
  * private vs. shared, the backend keeps {@link OwnerType} + owner id.
  */
 public enum Visibility {

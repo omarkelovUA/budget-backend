@@ -19,7 +19,7 @@ import com.familybudget.TestUsers;
 import com.familybudget.TestUsers.Session;
 
 /**
- * Family categories (PLAN.md M22): shared by default, managed by the admin, added by
+ * Family categories (ARCHITECTURE §3.2): shared by default, managed by the admin, added by
  * anyone, never duplicated for a member, and hidden only while nobody else uses them.
  */
 @IntegrationTest

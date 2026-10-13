@@ -34,7 +34,7 @@ import com.familybudget.user.model.UserView;
 import com.familybudget.user.service.UserService;
 
 /**
- * Money between family members (PLAN.md M14): the sender moves it from their own account
+ * Money between family members (ARCHITECTURE §3.2): the sender moves it from their own account
  * into the transient account for that recipient, the recipient collects it into one of
  * theirs, and the sender can take back what hasn't been collected. Every step is a plain
  * transfer, so in-transit money keeps counting for the sender.
@@ -126,7 +126,7 @@ public class FamilyTransferService {
 
 	/**
 	 * Leaving the family ends every transfer with its members: money still in transit is
-	 * written off as the sender's expense, then the transient accounts close (PLAN.md M14).
+	 * written off as the sender's expense, then the transient accounts close (ARCHITECTURE §3.2).
 	 */
 	@EventListener
 	@Transactional

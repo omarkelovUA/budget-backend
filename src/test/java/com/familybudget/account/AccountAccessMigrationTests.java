@@ -18,7 +18,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * V10 backfill (PLAN.md M12, open decision #5): runs the migrations up to V9 on its own
+ * V10 backfill (ARCHITECTURE §3.2): runs the migrations up to V9 on its own
  * database, inserts accounts in the old user/family shape, then applies V10.
  */
 @Testcontainers
