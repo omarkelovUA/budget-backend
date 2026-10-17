@@ -92,6 +92,109 @@ class TransactionFlowTests {
 	}
 
 	@Test
+	void splittingAPaymentReplacesItWithOnePaymentPerPart() {
+		Session alice = TestUsers.register(this.mvc);
+		this.api.clearDefaults(alice);
+		UUID card = this.api.account(alice, "Card", "1000");
+		UUID food = this.api.category(alice, "expense", "Food", "private");
+		UUID home = this.api.category(alice, "expense", "Home", "private");
+		UUID receipt = TestApi.id(this.api.post(alice, "/api/v1/transactions", """
+				{"kind": "payment", "amount": 420, "date": "2026-10-02", "note": "Market",
+				 "accountId": "%s", "categoryId": "%s"}
+				""".formatted(card, food)));
+
+		MvcTestResult split = split(alice, receipt, part(food, "300"), part(home, "120"));
+
+		assertThat(split).hasStatus(HttpStatus.CREATED);
+		assertThat(split).bodyJson().extractingPath("$[*].category.name").asArray().containsExactly("Food", "Home");
+		assertThat(split).bodyJson().extractingPath("$[*].amount").asArray().containsExactly(300.0, 120.0);
+		assertThat(split).bodyJson().extractingPath("$[*].date").asArray().containsOnly("2026-10-02");
+		assertThat(split).bodyJson().extractingPath("$[*].note").asArray().containsOnly("Market");
+		assertThat(split).bodyJson().extractingPath("$[*].account.name").asArray().containsOnly("Card");
+		assertThat(this.api.get(alice, "/api/v1/transactions")).bodyJson()
+			.extractingPath("$.content[*].id")
+			.asArray()
+			.doesNotContain(receipt.toString())
+			.hasSize(2);
+		assertThat(this.api.balance(alice, card)).isEqualByComparingTo("580.00");
+	}
+
+	@Test
+	void splitPartsMustAddUpAndKeepTheCategoryType() {
+		Session alice = TestUsers.register(this.mvc);
+		this.api.clearDefaults(alice);
+		UUID card = this.api.account(alice, "Card", "1000");
+		UUID savings = this.api.account(alice, "Savings", "0");
+		UUID food = this.api.category(alice, "expense", "Food", "private");
+		UUID salary = this.api.category(alice, "income", "Salary", "private");
+		UUID payment = TestApi.id(this.api.pay(alice, card, food, "100", "2026-10-02"));
+		UUID transfer = TestApi.id(this.api.transfer(alice, card, savings, "100"));
+
+		assertThat(split(alice, payment, part(food, "60"), part(food, "30"))).hasStatus(HttpStatus.BAD_REQUEST)
+			.bodyJson()
+			.extractingPath("$.type")
+			.isEqualTo(TestApi.PROBLEMS + "split-total-mismatch");
+		assertThat(split(alice, payment, part(food, "60"), part(salary, "40"))).hasStatus(HttpStatus.BAD_REQUEST)
+			.bodyJson()
+			.extractingPath("$.type")
+			.isEqualTo(TestApi.PROBLEMS + "invalid-transaction");
+		assertThat(split(alice, transfer, part(food, "60"), part(food, "40"))).hasStatus(HttpStatus.BAD_REQUEST)
+			.bodyJson()
+			.extractingPath("$.type")
+			.isEqualTo(TestApi.PROBLEMS + "invalid-transaction");
+		assertThat(split(alice, payment, part(food, "100"))).hasStatus(HttpStatus.BAD_REQUEST)
+			.bodyJson()
+			.extractingPath("$.type")
+			.isEqualTo(TestApi.PROBLEMS + "validation-failed");
+		assertThat(split(alice, payment, part(food, "100.5"), part(food, "-0.5"))).hasStatus(HttpStatus.BAD_REQUEST);
+		assertThat(split(alice, UUID.randomUUID(), part(food, "60"), part(food, "40")))
+			.hasStatus(HttpStatus.NOT_FOUND);
+		assertThat(this.api.get(alice, "/api/v1/transactions")).bodyJson()
+			.extractingPath("$.content[*].id")
+			.asArray()
+			.contains(payment.toString());
+	}
+
+	@Test
+	void splitFollowsTheDeleteRules() {
+		Session alice = TestUsers.register(this.mvc);
+		Session bob = TestUsers.register(this.mvc);
+		Session carol = TestUsers.register(this.mvc);
+		this.api.family(alice, bob, carol);
+		UUID joint = this.api.account(alice, "Joint", "100", shared(bob), shared(carol));
+		UUID food = this.api.category(alice, "expense", "Food", "shared");
+		UUID payment = TestApi.id(this.api.pay(bob, joint, food, "10", "2026-10-01"));
+
+		assertThat(split(carol, payment, part(food, "6"), part(food, "4"))).hasStatus(HttpStatus.FORBIDDEN)
+			.bodyJson()
+			.extractingPath("$.type")
+			.isEqualTo(TestApi.PROBLEMS + "transaction-not-editable");
+		// The owner may split what Bob recorded; the parts stay Bob's.
+		assertThat(split(alice, payment, part(food, "6"), part(food, "4"))).hasStatus(HttpStatus.CREATED)
+			.bodyJson()
+			.extractingPath("$[*].recordedBy")
+			.asArray()
+			.containsOnly(bob.userId().toString());
+	}
+
+	@Test
+	void splitSentAgainWithTheSameIdsReturnsTheFirstParts() {
+		Session alice = TestUsers.register(this.mvc);
+		UUID card = this.api.account(alice, "Card", "100");
+		UUID food = this.api.category(alice, "expense", "Food", "private");
+		UUID payment = TestApi.id(this.api.pay(alice, card, food, "10", "2026-10-01"));
+		String first = partWithId(UUID.randomUUID(), food, "7");
+		String second = partWithId(UUID.randomUUID(), food, "3");
+
+		assertThat(split(alice, payment, first, second)).hasStatus(HttpStatus.CREATED);
+		MvcTestResult retry = split(alice, payment, first, second);
+
+		assertThat(retry).hasStatus(HttpStatus.CREATED).bodyJson().extractingPath("$[*].amount").asArray().hasSize(2);
+		assertThat(this.api.get(alice, "/api/v1/transactions")).bodyJson().extractingPath("$.totalElements").isEqualTo(2);
+		assertThat(this.api.balance(alice, card)).isEqualByComparingTo("90.00");
+	}
+
+	@Test
 	void membersSeeTransactionsOnAccountsSharedWithThem() {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);
@@ -250,6 +353,19 @@ class TransactionFlowTests {
 		assertThat(page).bodyJson().extractingPath("$.totalElements").isEqualTo(3);
 		assertThat(page).bodyJson().extractingPath("$.totalPages").isEqualTo(2);
 		assertThat(this.api.get(alice, "/api/v1/transactions?size=500")).hasStatus(HttpStatus.BAD_REQUEST);
+	}
+
+	private MvcTestResult split(Session session, UUID id, String... parts) {
+		return this.api.post(session, "/api/v1/transactions/" + id + "/split",
+				"{\"parts\": [" + String.join(",", parts) + "]}");
+	}
+
+	private static String part(UUID categoryId, String amount) {
+		return "{\"categoryId\": \"%s\", \"amount\": %s}".formatted(categoryId, amount);
+	}
+
+	private static String partWithId(UUID id, UUID categoryId, String amount) {
+		return "{\"id\": \"%s\", \"categoryId\": \"%s\", \"amount\": %s}".formatted(id, categoryId, amount);
 	}
 
 }

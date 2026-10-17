@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.familybudget.common.model.PageView;
 import com.familybudget.common.web.CurrentUserId;
 import com.familybudget.transaction.model.MonthSummaryView;
+import com.familybudget.transaction.model.SplitRequest;
 import com.familybudget.transaction.model.TransactionRequest;
 import com.familybudget.transaction.model.TransactionView;
 import com.familybudget.transaction.service.TransactionService;
@@ -53,6 +54,13 @@ class TransactionController {
 	@ResponseStatus(HttpStatus.CREATED)
 	TransactionView create(@CurrentUserId UUID userId, @Valid @RequestBody TransactionRequest request) {
 		return this.transactionService.create(userId, request);
+	}
+
+	@PostMapping("/{id}/split")
+	@ResponseStatus(HttpStatus.CREATED)
+	List<TransactionView> split(@CurrentUserId UUID userId, @PathVariable UUID id,
+			@Valid @RequestBody SplitRequest request) {
+		return this.transactionService.split(userId, id, request);
 	}
 
 	@DeleteMapping("/{id}")

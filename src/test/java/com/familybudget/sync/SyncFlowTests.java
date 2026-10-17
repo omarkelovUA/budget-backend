@@ -242,6 +242,23 @@ class SyncFlowTests {
 	}
 
 	@Test
+	void splitPaymentIsReportedAsDeletedAndItsPartsAsNew() {
+		Session alice = TestUsers.register(this.mvc);
+		UUID account = this.api.account(alice, "Card", "100");
+		UUID category = this.api.category(alice, "expense", "Food-" + UUID.randomUUID(), "private");
+		UUID payment = TestApi.id(this.api.pay(alice, account, category, "30", "2026-10-05"));
+		String cursor = start(alice);
+
+		assertThat(this.api.post(alice, "/api/v1/transactions/" + payment + "/split", """
+				{"parts": [{"categoryId": "%1$s", "amount": 20}, {"categoryId": "%1$s", "amount": 10}]}
+				""".formatted(category))).hasStatus(HttpStatus.CREATED);
+
+		MvcTestResult result = changes(alice, cursor);
+		assertThat(result).bodyJson().extractingPath("$.deleted.transactions").asArray().contains(payment.toString());
+		assertThat(result).bodyJson().extractingPath("$.transactions[*].amount").asArray().containsOnly(20.0, 10.0);
+	}
+
+	@Test
 	void hiddenFamilyCategoryLeavesTheMembersFeed() {
 		Session alice = TestUsers.register(this.mvc);
 		Session bob = TestUsers.register(this.mvc);

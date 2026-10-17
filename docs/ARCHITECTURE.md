@@ -203,6 +203,14 @@ access to the account(s) a transaction touches:
   answer is `403 transaction-not-editable`. Responses carry `editable` so clients don't
   repeat the rule.
 - Transactions are immutable: correcting one means deleting and re-creating it.
+- **Splitting** (`POST /transactions/{id}/split {parts: [{id?, categoryId, amount}]}`,
+  `201` with the new transactions) replaces a payment with 2–50 independent payments on
+  the same account, date and note, recorded by the same person, in one database
+  transaction. The parts must add up to the original (`400 split-total-mismatch`) and use
+  accessible categories of its type, so the balance doesn't move; transfers can't be split
+  (`invalid-transaction`). It's allowed whenever deleting the payment is. Nothing links the
+  parts afterwards; the sync feed reports the original as deleted and the parts as new. A
+  retry whose first part id already exists returns the parts made the first time (§5.3).
   Recording or deleting a transaction adjusts the touched balances in the same database
   transaction (atomic `balance = balance + delta`).
 - A payment's direction comes from its category type (income adds, expense subtracts);
@@ -543,7 +551,7 @@ Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
 `alone-in-family`, `not-alone`, `user-not-found`, `already-requested`, `invalid-join-request`,
 `visibility-immutable`, `category-type-immutable`, `account-in-use`, `category-in-use`,
 `category-exists`, `category-used-by-family`,
-`invalid-transaction`, `currency-mismatch`, `transaction-not-editable`,
+`invalid-transaction`, `split-total-mismatch`, `currency-mismatch`, `transaction-not-editable`,
 `category-not-shared`, `budget-exists`, `not-account-owner`, `account-read-only`,
 `account-closed`, `grantee-not-in-family`, `close-target-required`, `invalid-currency`,
 `transient-account`, `recipient-not-in-family`, `insufficient-in-transit`,

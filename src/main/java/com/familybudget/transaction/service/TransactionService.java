@@ -41,6 +41,7 @@ import com.familybudget.common.service.SyncTombstones;
 import com.familybudget.family.service.FamilyService;
 import com.familybudget.transaction.entity.TransactionEntity;
 import com.familybudget.transaction.model.MonthSummaryView;
+import com.familybudget.transaction.model.SplitRequest;
 import com.familybudget.transaction.model.TransactionKind;
 import com.familybudget.transaction.model.TransactionRequest;
 import com.familybudget.transaction.model.TransactionView;
@@ -181,28 +182,8 @@ public class TransactionService {
 
 	@Transactional
 	public void delete(UUID userId, UUID id) {
-		TransactionEntity transaction = this.transactions.findById(id)
-			.orElseThrow(() -> new NotFoundException("Transaction not found"));
+		TransactionEntity transaction = requireDeletable(userId, id);
 		List<UUID> touched = transaction.accountIds();
-		Collection<AccountRef> accounts = this.accountService.refs(userId, touched).values();
-		if (accounts.stream().noneMatch((account) -> account.access().canView())) {
-			throw new NotFoundException("Transaction not found");
-		}
-		// Corrections to money in transit go through take back, never by deleting history.
-		if (accounts.stream().anyMatch(AccountRef::inTransit)) {
-			throw new ApiException(HttpStatus.CONFLICT, "transient-account",
-					"Family transfers can't be deleted; take the money back instead");
-		}
-		// Deleting would change a closed account's frozen balance.
-		if (accounts.stream().anyMatch(AccountRef::closed)) {
-			throw new ApiException(HttpStatus.CONFLICT, "account-closed",
-					"This transaction touches a closed account");
-		}
-		if (!isEditable(transaction, accounts, userId)) {
-			throw new ApiException(HttpStatus.FORBIDDEN, "transaction-not-editable",
-					"Only whoever recorded this transaction or the account's owner can delete it,"
-							+ " and only with shared access to every account it touches");
-		}
 		if (transaction.getKind() == TransactionKind.PAYMENT) {
 			CategoryView category = this.categoryService.views(List.of(TransactionEntity.require(transaction.getCategoryId())))
 				.values()
@@ -215,6 +196,56 @@ public class TransactionService {
 			this.accountService.adjustBalance(touched.get(1), transaction.getAmount().negate());
 		}
 		this.transactions.delete(transaction);
+	}
+
+	/**
+	 * Replaces a payment with one payment per part, on the same account, date and note and
+	 * recorded by the same person. The parts add up to the original and keep its category
+	 * type, so the balance doesn't move. Allowed whenever deleting the payment is.
+	 */
+	@Transactional
+	public List<TransactionView> split(UUID userId, UUID id, SplitRequest request) {
+		UUID firstPartId = request.parts().getFirst().id();
+		if (firstPartId != null) {
+			this.tombstones.requireNotDeleted("transaction", firstPartId);
+			if (this.transactions.existsById(firstPartId)) {
+				return replaySplit(userId, request);
+			}
+		}
+		TransactionEntity transaction = requireDeletable(userId, id);
+		if (transaction.getKind() != TransactionKind.PAYMENT) {
+			throw invalid("Only a payment can be split");
+		}
+		BigDecimal total = request.parts()
+			.stream()
+			.map(SplitRequest.Part::amount)
+			.reduce(BigDecimal.ZERO, BigDecimal::add);
+		if (total.compareTo(transaction.getAmount()) != 0) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "split-total-mismatch",
+					"The parts must add up to the payment's amount");
+		}
+		AccessScope scope = this.familyService.scopeFor(userId);
+		CategoryType type = this.categoryService.views(List.of(TransactionEntity.require(transaction.getCategoryId())))
+			.values()
+			.iterator()
+			.next()
+			.type();
+		Set<UUID> categoryIds = new HashSet<>();
+		request.parts().forEach((part) -> categoryIds.add(part.categoryId()));
+		for (UUID categoryId : categoryIds) {
+			if (this.categoryService.requireAccessible(scope, categoryId).type() != type) {
+				throw invalid("Every part needs a category of the payment's type");
+			}
+		}
+		this.transactions.delete(transaction);
+		List<TransactionEntity> parts = request.parts().stream().map((part) -> {
+			TransactionEntity payment = TransactionEntity.payment(part.amount(), transaction.getOccurredOn(),
+					transaction.getRecordedBy(), transaction.getNote(), TransactionEntity.require(transaction.getAccountId()),
+					part.categoryId());
+			payment.useClientId(part.id());
+			return payment;
+		}).toList();
+		return toViews(userId, this.transactions.saveAll(parts));
 	}
 
 	/**
@@ -275,6 +306,43 @@ public class TransactionService {
 			.allMatch((account) -> account.access().canUse() && !account.closed() && !account.inTransit());
 		return usable && (transaction.getRecordedBy().equals(userId)
 				|| accounts.stream().anyMatch((account) -> account.access() == AccountAccess.OWNER));
+	}
+
+	/** The transaction, if the user may delete it (ARCHITECTURE §3.2). */
+	private TransactionEntity requireDeletable(UUID userId, UUID id) {
+		TransactionEntity transaction = this.transactions.findById(id)
+			.orElseThrow(() -> new NotFoundException("Transaction not found"));
+		Collection<AccountRef> accounts = this.accountService.refs(userId, transaction.accountIds()).values();
+		if (accounts.stream().noneMatch((account) -> account.access().canView())) {
+			throw new NotFoundException("Transaction not found");
+		}
+		// Corrections to money in transit go through take back, never by deleting history.
+		if (accounts.stream().anyMatch(AccountRef::inTransit)) {
+			throw new ApiException(HttpStatus.CONFLICT, "transient-account",
+					"Family transfers can't be deleted; take the money back instead");
+		}
+		// Deleting would change a closed account's frozen balance.
+		if (accounts.stream().anyMatch(AccountRef::closed)) {
+			throw new ApiException(HttpStatus.CONFLICT, "account-closed",
+					"This transaction touches a closed account");
+		}
+		if (!isEditable(transaction, accounts, userId)) {
+			throw new ApiException(HttpStatus.FORBIDDEN, "transaction-not-editable",
+					"Only whoever recorded this transaction or the account's owner can delete it,"
+							+ " and only with shared access to every account it touches");
+		}
+		return transaction;
+	}
+
+	/** A split sent again with the same client ids returns the parts the first one made. */
+	private List<TransactionView> replaySplit(UUID userId, SplitRequest request) {
+		List<TransactionEntity> parts = this.transactions
+			.findAllById(request.parts().stream().map(SplitRequest.Part::id).filter(Objects::nonNull).toList());
+		List<UUID> viewable = this.accountService.viewableIds(userId);
+		if (parts.stream().anyMatch((part) -> Collections.disjoint(viewable, part.accountIds()))) {
+			throw new IdConflictException();
+		}
+		return toViews(userId, parts);
 	}
 
 	/** A create sent again with the same client id returns what the first one made. */
