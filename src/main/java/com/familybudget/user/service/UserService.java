@@ -46,12 +46,11 @@ public class UserService {
 	 * Finds the user for a Google login, the only way in, or creates them. An account from
 	 * before that (made with a password, its email never verified) and with the same
 	 * Google-verified email gets linked, which ends its existing sessions: whoever made it
-	 * may not be the person Google just vouched for. Without {@code confirmLink} such a
-	 * link is refused, so the client can warn the user first.
+	 * may not be the person Google just vouched for.
 	 */
 	@Transactional
 	public UserView findOrCreateFromGoogle(String subject, @Nullable String email, boolean emailVerified,
-			@Nullable String name, SignUpRegion region, boolean confirmLink) {
+			@Nullable String name, SignUpRegion region) {
 		Optional<UserEntity> linked = this.users.findByGoogleSubject(subject);
 		if (linked.isPresent()) {
 			return linked.get().toView();
@@ -62,10 +61,6 @@ public class UserService {
 		}
 		String normalizedEmail = normalizeEmail(email);
 		Optional<UserEntity> existing = this.users.findByEmail(normalizedEmail);
-		if (existing.isPresent() && !confirmLink) {
-			throw new ApiException(HttpStatus.CONFLICT, "google-link-confirmation-required",
-					"An account with this email exists; confirm linking it to Google");
-		}
 		UserEntity user = existing
 			.orElseGet(() -> new UserEntity(normalizedEmail, displayNameOrDefault(name, normalizedEmail), region));
 		user.linkGoogle(subject);

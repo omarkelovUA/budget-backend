@@ -45,7 +45,7 @@ class MobileAuthController {
 	MobileAuthResponse signIn(@Valid @RequestBody GoogleMobileRequest request, HttpServletRequest httpRequest) {
 		GoogleIdentity google = this.googleIdTokens.verify(request.idToken());
 		UserView user = this.userService.findOrCreateFromGoogle(google.subject(), google.email(),
-				google.emailVerified(), google.name(), ClientRegion.of(httpRequest), request.confirmLink());
+				google.emailVerified(), google.name(), ClientRegion.of(httpRequest));
 		return MobileAuthResponse.of(this.accessTokens.issue(user), this.refreshTokens.issue(user.id()));
 	}
 
@@ -61,7 +61,7 @@ class MobileAuthController {
 		return ResponseEntity.noContent().build();
 	}
 
-	record GoogleMobileRequest(@NotBlank String idToken, boolean confirmLink) {
+	record GoogleMobileRequest(@NotBlank String idToken) {
 	}
 
 	record RefreshRequest(@NotBlank String refreshToken) {

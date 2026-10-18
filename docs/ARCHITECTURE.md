@@ -555,7 +555,7 @@ Problem types so far: `not-found`, `invalid-refresh-token`, `email-not-verified`
 `transient-account`, `recipient-not-in-family`, `insufficient-in-transit`,
 `unsupported-language`, `invalid-used-currencies`, `default-currency-not-used`,
 `unsupported-theme`, `invalid-google-token`, `google-unavailable`,
-`google-link-confirmation-required`, `id-conflict`, `already-deleted`,
+`id-conflict`, `already-deleted`,
 `invalid-sync-cursor`, `validation-failed`.
 
 `detail` texts are English and meant for developers and logs; the backend has no
@@ -595,7 +595,7 @@ sequenceDiagram
     else Mobile Google login (Android app)
         FE->>IDP: Credential Manager sign-in (audience: our client ID)
         IDP-->>FE: Google ID token
-        FE->>API: POST /api/v1/auth/google/mobile {idToken, confirmLink}
+        FE->>API: POST /api/v1/auth/google/mobile {idToken}
         API->>API: verify signature (Google JWKS), iss, aud, exp; find-or-create User
         API-->>FE: access token + refresh token (both in the body)
     end
@@ -639,10 +639,8 @@ only changes those two beans.
 - **Google reclaims an unverified account**: password sign-up, back when it existed,
   never verified the email. So when a Google login (with a Google-verified email) links
   to such an account, all of its sessions end as above: whoever registered the address
-  first, possibly not its owner, is locked out. The web login links straight away; the
-  mobile app has to send `confirmLink: true`. Without it, an
-  email that matches an unlinked account gets `409 google-link-confirmation-required`
-  and nothing changes, so the app can warn the user first.
+  first, possibly not its owner, is locked out. Web and mobile both link straight away,
+  without asking (older app versions still send a `confirmLink` field; it's ignored).
 - Longer-lived **refresh token** (30 days): an opaque random value, not a JWT, stored
   server-side only as a SHA-256 hash in `refresh_tokens`. Sent as an httpOnly + Secure +
   SameSite=Strict cookie scoped to `Path=/api/v1/auth`, so it only reaches the auth

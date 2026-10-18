@@ -37,7 +37,7 @@ class MobileAuthTests {
 	void newGoogleUserGetsBothTokensInTheBody() {
 		String email = TestUsers.uniqueEmail();
 
-		MvcTestResult result = signIn(TestGoogleIdTokens.sign((claims) -> claims.claim("email", email)), false,
+		MvcTestResult result = signIn(TestGoogleIdTokens.sign((claims) -> claims.claim("email", email)),
 				"de-DE");
 
 		assertThat(result).hasStatusOk();
@@ -57,9 +57,9 @@ class MobileAuthTests {
 	void returningGoogleUserIsTheSameUser() {
 		String subject = "google-returning-" + TestUsers.uniqueEmail();
 
-		String first = TestUsers.json(signIn(TestGoogleIdTokens.sign((claims) -> claims.subject(subject)), false),
+		String first = TestUsers.json(signIn(TestGoogleIdTokens.sign((claims) -> claims.subject(subject))),
 				"$.user.id");
-		String second = TestUsers.json(signIn(TestGoogleIdTokens.sign((claims) -> claims.subject(subject)), false),
+		String second = TestUsers.json(signIn(TestGoogleIdTokens.sign((claims) -> claims.subject(subject))),
 				"$.user.id");
 
 		assertThat(second).isEqualTo(first);
@@ -67,8 +67,7 @@ class MobileAuthTests {
 
 	@Test
 	void tokenForAnotherClientIsRejected() {
-		MvcTestResult result = signIn(TestGoogleIdTokens.sign((claims) -> claims.audience(List.of("someone-else"))),
-				false);
+		MvcTestResult result = signIn(TestGoogleIdTokens.sign((claims) -> claims.audience(List.of("someone-else"))));
 
 		assertThat(result).hasStatus(HttpStatus.UNAUTHORIZED);
 		assertThat(result).bodyJson().extractingPath("$.type").isEqualTo(TestApi.PROBLEMS + "invalid-google-token");
@@ -76,27 +75,25 @@ class MobileAuthTests {
 
 	@Test
 	void unverifiedEmailIsRejected() {
-		MvcTestResult result = signIn(TestGoogleIdTokens.sign((claims) -> claims.claim("email_verified", false)),
-				false);
+		MvcTestResult result = signIn(TestGoogleIdTokens.sign((claims) -> claims.claim("email_verified", false)));
 
 		assertThat(result).hasStatus(HttpStatus.UNAUTHORIZED);
 		assertThat(result).bodyJson().extractingPath("$.type").isEqualTo(TestApi.PROBLEMS + "email-not-verified");
 	}
 
 	@Test
-	void linkingAnOldPasswordAccountNeedsConsent() {
+	void anOldPasswordAccountIsLinkedStraightAway() {
 		Session existing = new TestApi(this.mvc, this.jdbc).unlinkGoogle(TestUsers.register(this.mvc));
 		String token = TestGoogleIdTokens.sign((claims) -> claims.claim("email", existing.email()));
 
-		MvcTestResult refused = signIn(token, false);
-
-		assertThat(refused).hasStatus(HttpStatus.CONFLICT);
-		assertThat(refused).bodyJson()
-			.extractingPath("$.type")
-			.isEqualTo(TestApi.PROBLEMS + "google-link-confirmation-required");
-		assertThat(me(existing.bearer())).hasStatusOk();
-
-		MvcTestResult linked = signIn(token, true);
+		// Older app versions still send confirmLink; it's ignored.
+		MvcTestResult linked = this.mvc.post()
+			.uri("/api/v1/auth/google/mobile")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+					{"idToken": "%s", "confirmLink": false}
+					""".formatted(token))
+			.exchange();
 
 		assertThat(linked).hasStatusOk();
 		assertThat(linked).bodyJson().extractingPath("$.user.id").isEqualTo(existing.userId().toString());
@@ -120,7 +117,7 @@ class MobileAuthTests {
 	@Test
 	void mobileRefreshRotatesTheToken() {
 		String old = TestUsers.json(signIn(TestGoogleIdTokens.sign((claims) -> {
-		}), false), "$.refreshToken");
+		})), "$.refreshToken");
 
 		MvcTestResult refreshed = mobile("refresh", old);
 
@@ -139,7 +136,7 @@ class MobileAuthTests {
 	@Test
 	void replayingAnOldMobileTokenLaterRevokesAllSessions() {
 		MvcTestResult session = signIn(TestGoogleIdTokens.sign((claims) -> {
-		}), false);
+		}));
 		String old = TestUsers.json(session, "$.refreshToken");
 		String rotated = TestUsers.json(mobile("refresh", old), "$.refreshToken");
 		this.jdbc.update("update refresh_tokens set revoked_at = now() - interval '1 hour' where user_id = ? and revoked_at is not null",
@@ -152,7 +149,7 @@ class MobileAuthTests {
 	@Test
 	void mobileLogoutRevokesTheToken() {
 		String token = TestUsers.json(signIn(TestGoogleIdTokens.sign((claims) -> {
-		}), false), "$.refreshToken");
+		})), "$.refreshToken");
 
 		MvcTestResult logout = mobile("logout", token);
 
@@ -173,13 +170,13 @@ class MobileAuthTests {
 		assertThat(result).bodyJson().extractingPath("$.type").isEqualTo(TestApi.PROBLEMS + "validation-failed");
 	}
 
-	private MvcTestResult signIn(String idToken, boolean confirmLink, String... acceptLanguage) {
+	private MvcTestResult signIn(String idToken, String... acceptLanguage) {
 		var request = this.mvc.post()
 			.uri("/api/v1/auth/google/mobile")
 			.contentType(MediaType.APPLICATION_JSON)
 			.content("""
-					{"idToken": "%s", "confirmLink": %s}
-					""".formatted(idToken, confirmLink));
+					{"idToken": "%s"}
+					""".formatted(idToken));
 		if (acceptLanguage.length > 0) {
 			request = request.header(HttpHeaders.ACCEPT_LANGUAGE, acceptLanguage);
 		}

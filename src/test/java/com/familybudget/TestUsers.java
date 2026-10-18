@@ -45,7 +45,7 @@ public final class TestUsers {
 			.uri("/api/v1/auth/google/mobile")
 			.contentType(MediaType.APPLICATION_JSON)
 			.content("""
-					{"idToken": "%s", "confirmLink": false}
+					{"idToken": "%s"}
 					""".formatted(idToken));
 		if (acceptLanguage != null) {
 			request = request.header(HttpHeaders.ACCEPT_LANGUAGE, acceptLanguage);
