@@ -54,6 +54,7 @@ All optional for local use; the defaults work out of the box.
 | `GOOGLE_PLAY_PACKAGE_NAME` | `app.familybudget` | The Android app whose subscriptions count. |
 | `GOOGLE_PLAY_CREDENTIALS` | empty | Path to the Play service account's JSON key. Empty: purchases can't be checked (`503 google-play-unavailable`); manual grants still work. |
 | `GOOGLE_PLAY_PUSH_AUDIENCE` / `GOOGLE_PLAY_PUSH_SERVICE_ACCOUNT` | placeholder | The OIDC audience and service account of the Pub/Sub push subscription that delivers Google Play's notifications. |
+| `APP_OPERATOR_EMAILS` | empty | Comma-separated emails (Google-linked accounts) that may open the operator page. |
 | `SERVER_FORWARD_HEADERS_STRATEGY` | none | Set to `native` behind a reverse proxy, so Google's redirect URI uses the proxy's `https` scheme. |
 
 ### Google login (required)
@@ -135,6 +136,7 @@ own token) and `/actuator/health` needs `Authorization: Bearer <access token>`.
 | Auth | Google only: `/oauth2/authorization/google` (web), `POST /auth/google/mobile` (app); `POST /auth/refresh`, `/auth/logout`, `/auth/mobile/refresh`, `/auth/mobile/logout` |
 | User | `GET /users/me`, `GET`/`PUT /users/me/settings` |
 | Subscriptions | `GET /subscriptions/me`, `POST /subscriptions/google-play`; `POST /webhooks/google-play` (Pub/Sub) |
+| Operator | `GET /operator/stats`, `GET`/`POST /operator/grants`, `DELETE /operator/grants/{userId}` (operators only) |
 | Family transfers | `GET`/`POST /family-transfers`, `POST /family-transfers/{id}/collect`, `POST /family-transfers/{id}/take-back` |
 | Family | `POST /families`, `GET /families/current`, `POST`/`GET /families/current/invitations`, `DELETE /families/current/invitations/{id}`, `GET /invitations`, `POST /invitations/{id}/accept`, `POST /invitations/{id}/decline`, `POST /families/current/leave`, `PATCH`/`DELETE /families/current/members/{userId}` |
 | Accounts | `GET`/`POST /accounts` (`?closed=true` for your closed ones), `GET`/`PUT`/`DELETE /accounts/{id}`, `POST /accounts/{id}/close` |

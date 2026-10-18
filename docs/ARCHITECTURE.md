@@ -467,7 +467,7 @@ Pub/Sub as pushes to `POST /webhooks/google-play`, authenticated as in §6.1.
 - `SubscriptionRecheck` re-reads, every night, Play rows expiring within 3 days or
   already past expiry but not marked `expired`, in case a notification was lost.
 
-**Manual grants** (testing; later the operator page) are rows with `source = 'MANUAL'`.
+**Manual grants** (testing, and the operator page, §3.5) are rows with `source = 'MANUAL'`.
 The table's defaults keep the SQL short:
 
 ```sql
@@ -478,6 +478,34 @@ SELECT id, 'MANUAL', 'ACTIVE' FROM users WHERE email = 'someone@gmail.com';
 DELETE FROM subscriptions s USING users u
 WHERE s.user_id = u.id AND s.source = 'MANUAL' AND u.email = 'someone@gmail.com';
 ```
+
+### 3.5 Operator page
+
+Whoever runs the service (the **operator**; "admin" stays the family role) gets a web page
+with usage numbers and the manual grants (§3.4). The `operator` module serves it; it reads
+the other modules through their services, and nothing depends on it.
+
+- **Who's an operator:** `APP_OPERATOR_EMAILS` (comma-separated) names them by email.
+  Only a Google-linked account counts, so the email is the one Google verified. Nothing is
+  stored. `GET /users/me` says `operator: true|false`; every `/operator/**` call by anyone
+  else gets `403 operator-required`.
+- **Activity:** a user is active on a day (UTC) when one of their sessions starts or
+  refreshes, web or mobile. `RefreshTokenService.issue` records it in `user_activity`, one
+  row per user and day (V26; an insert that ignores duplicates).
+- **`GET /operator/stats`:**
+  - `users`: `total`, `newLast7Days`, `newLast30Days`, `activeLast30Days`, and over the
+    last 30 days (oldest first, every day listed) `signups` and `activeUsers` as
+    `{day, count}`;
+  - `families`: `withMembers` (more than one member), `frozen`;
+  - `subscriptions`: users entitled now through Play (`activeGooglePlay`) and manual
+    grants (`activeManual`), and Play purchases by state (`googlePlayByState`).
+- **Manual grants:**
+  - `GET /operator/grants` lists them with the user's email and name, `expiresAt` (null:
+    no end) and `active`.
+  - `POST /operator/grants {email, expiresAt?}` gives a grant, or changes the end of the
+    one the user has (`404 user-not-found` for an unknown email).
+  - `DELETE /operator/grants/{userId}` takes it back (`404 not-found` without one).
+  - They're the same rows as the SQL in §3.4.
 
 ## 4. Client contract
 
@@ -547,6 +575,7 @@ com.familybudget
   transaction/
   budget/
   subscription/      # Play purchases, Google's notifications, manual grants (§3.4)
+  operator/          # the operator page's numbers and manual grants (§3.5)
   sync/              # the mobile app's change feed (§6.5); depends on all of the above
 
 com.familybudget.<module>
@@ -629,6 +658,7 @@ Problem types so far: `not-found`, `invalid-refresh-token`, `email-not-verified`
 `unsupported-language`, `invalid-used-currencies`, `default-currency-not-used`,
 `unsupported-theme`, `invalid-google-token`, `google-unavailable`,
 `subscription-required`, `family-frozen`, `invalid-purchase`, `google-play-unavailable`,
+`operator-required`,
 `id-conflict`, `already-deleted`,
 `invalid-sync-cursor`, `validation-failed`.
 

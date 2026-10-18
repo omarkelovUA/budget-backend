@@ -1,13 +1,21 @@
 package com.familybudget.user.service;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.Currency;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -19,10 +27,13 @@ import com.familybudget.common.model.SyncWindow;
 import com.familybudget.user.entity.UserEntity;
 import com.familybudget.user.event.UserRegistered;
 import com.familybudget.user.event.UserSessionsInvalidated;
+import com.familybudget.user.model.CurrentUserView;
+import com.familybudget.user.model.DailyCount;
 import com.familybudget.user.model.SignUpRegion;
 import com.familybudget.user.model.SupportedLanguage;
 import com.familybudget.user.model.Theme;
 import com.familybudget.user.model.UserSettingsView;
+import com.familybudget.user.model.UserStatsView;
 import com.familybudget.user.model.UserView;
 import com.familybudget.user.repository.UserRepository;
 
@@ -35,11 +46,22 @@ public class UserService {
 
 	private final ApplicationEventPublisher events;
 
+	/** Who runs the service (ARCHITECTURE.md §3.5), by normalized email. */
+	private final Set<String> operatorEmails;
+
 	public static final int MAX_USED_CURRENCIES = 20;
 
-	UserService(UserRepository users, ApplicationEventPublisher events) {
+	/** How far back the operator page's daily numbers go. */
+	static final int STATS_DAYS = 30;
+
+	UserService(UserRepository users, ApplicationEventPublisher events,
+			@Value("${app.operator.emails}") List<String> operatorEmails) {
 		this.users = users;
 		this.events = events;
+		this.operatorEmails = operatorEmails.stream()
+			.filter((email) -> !email.isBlank())
+			.map(UserService::normalizeEmail)
+			.collect(Collectors.toUnmodifiableSet());
 	}
 
 	/**
@@ -75,6 +97,50 @@ public class UserService {
 	private UserView registered(UserEntity user) {
 		this.events.publishEvent(new UserRegistered(user.getId(), user.settings().language()));
 		return user.toView();
+	}
+
+	/** The caller for {@code GET /users/me}. */
+	public CurrentUserView current(UUID id) {
+		UserEntity user = entity(id);
+		return new CurrentUserView(id, user.getEmail(), user.getDisplayName(), isOperator(user));
+	}
+
+	/**
+	 * Only for a Google-linked account: its email is the one Google verified, so nobody can
+	 * become an operator by claiming the address.
+	 */
+	public void requireOperator(UUID id) {
+		if (!isOperator(entity(id))) {
+			throw new ApiException(HttpStatus.FORBIDDEN, "operator-required", "Only the service's operators can do this");
+		}
+	}
+
+	private boolean isOperator(UserEntity user) {
+		return user.getGoogleSubject() != null && this.operatorEmails.contains(user.getEmail());
+	}
+
+	/** A session of the user started or refreshed today (UTC); once per day is enough. */
+	@Transactional
+	public void recordActivity(UUID id) {
+		this.users.recordActivity(id, LocalDate.now(ZoneOffset.UTC));
+	}
+
+	public UserStatsView stats() {
+		LocalDate today = LocalDate.now(ZoneOffset.UTC);
+		LocalDate from = today.minusDays(STATS_DAYS - 1);
+		Instant now = Instant.now();
+		return new UserStatsView(this.users.count(), this.users.countByCreatedAtAfter(now.minus(Duration.ofDays(7))),
+				this.users.countByCreatedAtAfter(now.minus(Duration.ofDays(STATS_DAYS))),
+				this.users.countActiveSince(from),
+				daily(from, today, this.users.signupsPerDaySince(from.atStartOfDay(ZoneOffset.UTC).toInstant())),
+				daily(from, today, this.users.activePerDaySince(from)));
+	}
+
+	/** Every day from {@code from} to {@code to}, those without a row counted 0. */
+	private static List<DailyCount> daily(LocalDate from, LocalDate to, List<UserRepository.DayCount> rows) {
+		Map<LocalDate, Long> counts = rows.stream()
+			.collect(Collectors.toMap(UserRepository.DayCount::getDay, UserRepository.DayCount::getCount));
+		return from.datesUntil(to.plusDays(1)).map((day) -> new DailyCount(day, counts.getOrDefault(day, 0L))).toList();
 	}
 
 	public UserView get(UUID id) {

@@ -41,6 +41,7 @@ services:
       REFRESH_COOKIE_SECURE: 'true'
       # Google Play subscriptions (ARCHITECTURE.md §3.4). Until they're set, purchases can't
       # be checked; manual grants still work.
+      APP_OPERATOR_EMAILS: '${APP_OPERATOR_EMAILS:-}'
       GOOGLE_PLAY_CREDENTIALS: '${GOOGLE_PLAY_CREDENTIALS:-}'
       GOOGLE_PLAY_PUSH_AUDIENCE: '${GOOGLE_PLAY_PUSH_AUDIENCE:-not-configured}'
       GOOGLE_PLAY_PUSH_SERVICE_ACCOUNT: '${GOOGLE_PLAY_PUSH_SERVICE_ACCOUNT:-not-configured}'

@@ -13,12 +13,15 @@ import org.springframework.context.annotation.Import;
  * Full application context against a real Postgres (Testcontainers). Every test class
  * using this shares one cached context and therefore one container. Google ID tokens
  * are trusted when signed by {@link TestGoogleIdTokens}; Google Play is {@link TestGooglePlay}.
+ * {@link #OPERATOR} may open the operator page.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @Import({ TestcontainersConfiguration.class, TestGoogleIdTokens.Config.class, TestGooglePlay.Config.class })
-@SpringBootTest
+@SpringBootTest(properties = "app.operator.emails=" + IntegrationTest.OPERATOR)
 @AutoConfigureMockMvc
 public @interface IntegrationTest {
+
+	String OPERATOR = "operator@familybudget.test";
 
 }

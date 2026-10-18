@@ -51,6 +51,10 @@ app:
       cleanup-cron: '0 30 3 * * *'
     cors:
       allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
+  # Who may open the operator page (ARCHITECTURE.md §3.5): comma-separated emails of
+  # Google-linked accounts. Empty: nobody.
+  operator:
+    emails: ${APP_OPERATOR_EMAILS:}
   family:
     invite-ttl: 7d
   subscription:

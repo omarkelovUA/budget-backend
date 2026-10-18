@@ -9,18 +9,25 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.familybudget.common.exception.ApiException;
 import com.familybudget.subscription.entity.SubscriptionEntity;
+import com.familybudget.subscription.model.ManualGrantView;
 import com.familybudget.subscription.model.SubscriptionSource;
 import com.familybudget.subscription.model.SubscriptionState;
+import com.familybudget.subscription.model.SubscriptionStatsView;
 import com.familybudget.subscription.model.SubscriptionView;
 import com.familybudget.subscription.repository.SubscriptionRepository;
 
@@ -45,6 +52,52 @@ public class SubscriptionService {
 	/** Whether any of these users has a subscription that entitles them now. */
 	public boolean anyEntitled(Collection<UUID> userIds) {
 		return !userIds.isEmpty() && this.subscriptions.anyEntitling(userIds, ENTITLING, Instant.now());
+	}
+
+	/** Those of these users who have a subscription that entitles them now. */
+	public Set<UUID> entitledAmong(Collection<UUID> userIds) {
+		return userIds.isEmpty() ? Set.of() : this.subscriptions.findEntitling(userIds, ENTITLING, Instant.now());
+	}
+
+	public SubscriptionStatsView stats() {
+		Instant now = Instant.now();
+		Map<SubscriptionState, Long> byState = new EnumMap<>(SubscriptionState.class);
+		for (Object[] row : this.subscriptions.countByState(SubscriptionSource.GOOGLE_PLAY)) {
+			byState.put((SubscriptionState) row[0], (Long) row[1]);
+		}
+		return new SubscriptionStatsView(
+				this.subscriptions.countEntitling(SubscriptionSource.GOOGLE_PLAY, ENTITLING, now),
+				this.subscriptions.countEntitling(SubscriptionSource.MANUAL, ENTITLING, now), byState);
+	}
+
+	/** Every manual grant, oldest first (ARCHITECTURE.md §3.4). */
+	public List<ManualGrantView> manualGrants() {
+		Instant now = Instant.now();
+		return this.subscriptions.findBySourceOrderByCreatedAt(SubscriptionSource.MANUAL)
+			.stream()
+			.map((grant) -> new ManualGrantView(grant.getUserId(), grant.getExpiresAt(),
+					Objects.requireNonNull(grant.getCreatedAt()), grant.entitles(now)))
+			.toList();
+	}
+
+	/** Gives the user a manual grant, or changes the end of the one they have. */
+	@Transactional
+	public void grantManual(UUID userId, @Nullable Instant expiresAt) {
+		List<SubscriptionEntity> grants = this.subscriptions.findByUserIdAndSource(userId, SubscriptionSource.MANUAL);
+		if (grants.isEmpty()) {
+			this.subscriptions.save(SubscriptionEntity.manual(userId, expiresAt));
+		}
+		else {
+			grants.forEach((grant) -> grant.regrant(expiresAt));
+		}
+	}
+
+	/** Removes the user's manual grants; false if there were none. */
+	@Transactional
+	public boolean revokeManual(UUID userId) {
+		List<SubscriptionEntity> grants = this.subscriptions.findByUserIdAndSource(userId, SubscriptionSource.MANUAL);
+		this.subscriptions.deleteAll(grants);
+		return !grants.isEmpty();
 	}
 
 	/** The user's entitling subscription that lasts longest, else their latest one. */

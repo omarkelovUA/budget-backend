@@ -62,7 +62,23 @@ public class SubscriptionEntity {
 	protected SubscriptionEntity() {
 	}
 
-	/** A Play purchase, filled in by {@link #apply}. Manual grants are inserted by hand. */
+	/** A grant given by hand (by an operator); {@code expiresAt} null for no end. */
+	public static SubscriptionEntity manual(UUID userId, @Nullable Instant expiresAt) {
+		SubscriptionEntity grant = new SubscriptionEntity();
+		grant.userId = userId;
+		grant.source = SubscriptionSource.MANUAL;
+		grant.state = SubscriptionState.ACTIVE;
+		grant.expiresAt = expiresAt;
+		return grant;
+	}
+
+	/** Changes a manual grant's end, which also makes it active again. */
+	public void regrant(@Nullable Instant expiresAt) {
+		this.state = SubscriptionState.ACTIVE;
+		this.expiresAt = expiresAt;
+	}
+
+	/** A Play purchase, filled in by {@link #apply}. */
 	public SubscriptionEntity(UUID userId, String purchaseToken) {
 		this.userId = userId;
 		this.source = SubscriptionSource.GOOGLE_PLAY;
@@ -98,6 +114,10 @@ public class SubscriptionEntity {
 
 	public @Nullable Instant getExpiresAt() {
 		return this.expiresAt;
+	}
+
+	public @Nullable Instant getCreatedAt() {
+		return this.createdAt;
 	}
 
 	public @Nullable Instant getUpdatedAt() {

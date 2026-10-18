@@ -28,6 +28,7 @@ import com.familybudget.family.event.FamilyDeleted;
 import com.familybudget.family.event.FamilyMembershipEnded;
 import com.familybudget.family.event.FamilyMembershipStarted;
 import com.familybudget.family.model.FamilyRole;
+import com.familybudget.family.model.FamilyStatsView;
 import com.familybudget.family.model.FamilyView;
 import com.familybudget.family.model.IncomingJoinRequestView;
 import com.familybudget.family.model.InvitationStatus;
@@ -125,6 +126,21 @@ public class FamilyService {
 	/** Whether the user's family is frozen: shared data is read-only (ARCHITECTURE.md §3.4). */
 	public boolean isFrozen(UUID userId) {
 		return scopeFor(userId).frozen();
+	}
+
+	/** Operator page: families with others in them, and how many of those are frozen. */
+	public FamilyStatsView stats() {
+		Map<UUID, List<UUID>> adminsByFamily = this.members.findInFamiliesWithOthers(FamilyRole.ADMIN)
+			.stream()
+			.collect(Collectors.groupingBy(FamilyMemberEntity::getFamilyId,
+					Collectors.mapping(FamilyMemberEntity::getUserId, Collectors.toList())));
+		Set<UUID> entitled = this.subscriptionService
+			.entitledAmong(adminsByFamily.values().stream().flatMap(List::stream).toList());
+		long frozen = adminsByFamily.values()
+			.stream()
+			.filter((admins) -> admins.stream().noneMatch(entitled::contains))
+			.count();
+		return new FamilyStatsView(adminsByFamily.size(), frozen);
 	}
 
 	public FamilyView current(UUID userId) {

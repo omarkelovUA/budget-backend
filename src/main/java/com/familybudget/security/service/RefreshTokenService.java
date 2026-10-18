@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.familybudget.common.exception.ApiException;
 import com.familybudget.security.entity.RefreshTokenEntity;
 import com.familybudget.security.repository.RefreshTokenRepository;
+import com.familybudget.user.service.UserService;
 
 /**
  * Opaque, rotating refresh tokens (ARCHITECTURE.md §6.2). Every refresh revokes the
@@ -31,13 +32,17 @@ public class RefreshTokenService {
 
 	private final RefreshTokenRepository tokens;
 
+	private final UserService userService;
+
 	private final Duration ttl;
 
 	private final Duration reuseGrace;
 
-	RefreshTokenService(RefreshTokenRepository tokens, @Value("${app.security.refresh-token.ttl}") Duration ttl,
+	RefreshTokenService(RefreshTokenRepository tokens, UserService userService,
+			@Value("${app.security.refresh-token.ttl}") Duration ttl,
 			@Value("${app.security.refresh-token.reuse-grace}") Duration reuseGrace) {
 		this.tokens = tokens;
+		this.userService = userService;
 		this.ttl = ttl;
 		this.reuseGrace = reuseGrace;
 	}
@@ -46,9 +51,13 @@ public class RefreshTokenService {
 		return this.ttl;
 	}
 
-	/** Returns the raw token value; only its hash is stored. */
+	/**
+	 * Returns the raw token value; only its hash is stored. Every sign-in and refresh comes
+	 * through here, so it also counts the user active today (operator page).
+	 */
 	@Transactional
 	public String issue(UUID userId) {
+		this.userService.recordActivity(userId);
 		byte[] bytes = new byte[32];
 		RANDOM.nextBytes(bytes);
 		String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);

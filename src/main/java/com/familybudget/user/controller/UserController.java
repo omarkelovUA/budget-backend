@@ -16,8 +16,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.familybudget.common.web.CurrentUserId;
+import com.familybudget.user.model.CurrentUserView;
 import com.familybudget.user.model.UserSettingsView;
-import com.familybudget.user.model.UserView;
 import com.familybudget.user.service.UserService;
 
 @RestController
@@ -31,8 +31,8 @@ class UserController {
 	}
 
 	@GetMapping("/me")
-	UserView me(@CurrentUserId UUID userId) {
-		return this.userService.get(userId);
+	CurrentUserView me(@CurrentUserId UUID userId) {
+		return this.userService.current(userId);
 	}
 
 	@GetMapping("/me/settings")
