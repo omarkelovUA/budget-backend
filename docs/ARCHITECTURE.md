@@ -428,7 +428,8 @@ trial; prices live in Play Console). The `subscription` module keeps one
   with `403 family-frozen` on:
   - creating or sharing family categories, changing, deleting or hiding them;
   - creating, changing or deleting shared budgets;
-  - recording on, or deleting transactions from, an account the caller doesn't own;
+  - recording on, or deleting transactions from, an account the caller doesn't own (their
+    `editable` turns false);
   - giving new or wider grants on an account;
   - sending a family transfer.
 

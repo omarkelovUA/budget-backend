@@ -145,6 +145,9 @@ class FamilySubscriptionFlowTests {
 		// Someone else's accounts, and sharing more.
 		assertFrozen(this.api.pay(bob, joint, pets, "5", "2026-10-06"));
 		assertFrozen(this.api.delete(bob, "/api/v1/transactions/{id}", bobsPayment));
+		assertThat(this.api.get(bob, "/api/v1/transactions?accountId={id}", joint)).bodyJson()
+			.extractingPath("$.content[0].editable")
+			.isEqualTo(false);
 		assertFrozen(this.api.updateAccount(alice, savings, "Savings", "100", shared(bob)));
 		assertFrozen(this.api.createAccount(alice, "New", "0", "UAH", visible(bob)));
 		assertFrozen(this.api.post(alice, "/api/v1/family-transfers", """

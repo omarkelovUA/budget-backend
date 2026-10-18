@@ -308,6 +308,11 @@ public class TransactionService {
 				|| accounts.stream().anyMatch((account) -> account.access() == AccountAccess.OWNER));
 	}
 
+	/** In a frozen family, someone else's accounts are read-only (ARCHITECTURE.md §3.4). */
+	private static boolean touchesOthersAccounts(Collection<AccountRef> accounts) {
+		return accounts.stream().anyMatch((account) -> account.access() != AccountAccess.OWNER);
+	}
+
 	/** The transaction, if the user may delete it (ARCHITECTURE §3.2). */
 	private TransactionEntity requireDeletable(UUID userId, UUID id) {
 		TransactionEntity transaction = this.transactions.findById(id)
@@ -331,8 +336,7 @@ public class TransactionService {
 					"Only whoever recorded this transaction or the account's owner can delete it,"
 							+ " and only with shared access to every account it touches");
 		}
-		if (accounts.stream().anyMatch((account) -> account.access() != AccountAccess.OWNER)
-				&& this.familyService.isFrozen(userId)) {
+		if (touchesOthersAccounts(accounts) && this.familyService.isFrozen(userId)) {
 			throw AccessScope.familyFrozen();
 		}
 		return transaction;
@@ -368,18 +372,20 @@ public class TransactionService {
 		}
 		Map<UUID, AccountRef> accounts = this.accountService.refs(userId, accountIds);
 		Map<UUID, CategoryView> categories = this.categoryService.viewsFor(userId, categoryIds);
-		return entities.stream().map((entity) -> toView(userId, entity, accounts, categories)).toList();
+		boolean frozen = this.familyService.isFrozen(userId);
+		return entities.stream().map((entity) -> toView(userId, entity, accounts, categories, frozen)).toList();
 	}
 
 	private static TransactionView toView(UUID userId, TransactionEntity entity, Map<UUID, AccountRef> accounts,
-			Map<UUID, CategoryView> categories) {
+			Map<UUID, CategoryView> categories, boolean frozen) {
 		AccountRef account = lookup(accounts, entity.getAccountId());
 		AccountRef fromAccount = lookup(accounts, entity.getFromAccountId());
 		AccountRef toAccount = lookup(accounts, entity.getToAccountId());
 		List<AccountRef> touched = entity.accountIds().stream().map(accounts::get).filter(Objects::nonNull).toList();
 		return new TransactionView(entity.getId(), entity.getKind(), entity.getAmount(), entity.getOccurredOn(),
 				entity.getNote(), entity.getRecordedBy(), account, lookup(categories, entity.getCategoryId()),
-				fromAccount, toAccount, isEditable(entity, touched, userId));
+				fromAccount, toAccount,
+				isEditable(entity, touched, userId) && !(frozen && touchesOthersAccounts(touched)));
 	}
 
 	private static <T> @Nullable T lookup(Map<UUID, T> values, @Nullable UUID id) {
