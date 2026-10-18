@@ -331,6 +331,10 @@ public class TransactionService {
 					"Only whoever recorded this transaction or the account's owner can delete it,"
 							+ " and only with shared access to every account it touches");
 		}
+		if (accounts.stream().anyMatch((account) -> account.access() != AccountAccess.OWNER)
+				&& this.familyService.isFrozen(userId)) {
+			throw AccessScope.familyFrozen();
+		}
 		return transaction;
 	}
 

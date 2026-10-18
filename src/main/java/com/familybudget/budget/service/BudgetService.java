@@ -119,6 +119,7 @@ public class BudgetService {
 	public BudgetView update(UUID userId, UUID id, BudgetRequest request) {
 		AccessScope scope = this.familyService.scopeFor(userId);
 		BudgetEntity budget = accessible(scope, id);
+		scope.requireWritable(budget.getOwnerType());
 		if (Visibility.of(budget.getOwnerType()) != request.visibility()) {
 			throw new ApiException(HttpStatus.CONFLICT, "visibility-immutable",
 					"A budget can't be moved between private and shared");
@@ -128,7 +129,10 @@ public class BudgetService {
 
 	@Transactional
 	public void delete(UUID userId, UUID id) {
-		this.budgets.delete(accessible(this.familyService.scopeFor(userId), id));
+		AccessScope scope = this.familyService.scopeFor(userId);
+		BudgetEntity budget = accessible(scope, id);
+		scope.requireWritable(budget.getOwnerType());
+		this.budgets.delete(budget);
 	}
 
 	private BudgetView save(BudgetEntity budget, AccessScope scope, BudgetRequest request) {

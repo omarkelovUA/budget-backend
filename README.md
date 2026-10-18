@@ -51,6 +51,9 @@ All optional for local use; the defaults work out of the box.
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Comma-separated origins allowed to call the API directly (not needed behind the frontend's dev proxy). |
 | `REFRESH_COOKIE_SECURE` | `true` | `Secure` flag on the refresh cookie. Chrome accepts it on `http://localhost`; set `false` if your browser drops it. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | placeholder | Needed to sign in at all: Google is the only login. The tests don't need them. |
+| `GOOGLE_PLAY_PACKAGE_NAME` | `app.familybudget` | The Android app whose subscriptions count. |
+| `GOOGLE_PLAY_CREDENTIALS` | empty | Path to the Play service account's JSON key. Empty: purchases can't be checked (`503 google-play-unavailable`); manual grants still work. |
+| `GOOGLE_PLAY_PUSH_AUDIENCE` / `GOOGLE_PLAY_PUSH_SERVICE_ACCOUNT` | placeholder | The OIDC audience and service account of the Pub/Sub push subscription that delivers Google Play's notifications. |
 | `SERVER_FORWARD_HEADERS_STRATEGY` | none | Set to `native` behind a reverse proxy, so Google's redirect URI uses the proxy's `https` scheme. |
 
 ### Google login (required)
@@ -124,13 +127,14 @@ migration it needs a restore. Logs: `docker compose logs -f --tail=200 api`.
 ## API overview
 
 All under `/api/v1`, JSON, errors as RFC 9457 `ProblemDetail` with a stable `type` (see
-ARCHITECTURE.md §5.4). Everything except `/auth/*` and `/actuator/health` needs
-`Authorization: Bearer <access token>`.
+ARCHITECTURE.md §5.4). Everything except `/auth/*`, `/webhooks/google-play` (Google's
+own token) and `/actuator/health` needs `Authorization: Bearer <access token>`.
 
 | Area | Endpoints |
 |---|---|
 | Auth | Google only: `/oauth2/authorization/google` (web), `POST /auth/google/mobile` (app); `POST /auth/refresh`, `/auth/logout`, `/auth/mobile/refresh`, `/auth/mobile/logout` |
 | User | `GET /users/me`, `GET`/`PUT /users/me/settings` |
+| Subscriptions | `GET /subscriptions/me`, `POST /subscriptions/google-play`; `POST /webhooks/google-play` (Pub/Sub) |
 | Family transfers | `GET`/`POST /family-transfers`, `POST /family-transfers/{id}/collect`, `POST /family-transfers/{id}/take-back` |
 | Family | `POST /families`, `GET /families/current`, `POST`/`GET /families/current/invitations`, `DELETE /families/current/invitations/{id}`, `GET /invitations`, `POST /invitations/{id}/accept`, `POST /invitations/{id}/decline`, `POST /families/current/leave`, `PATCH`/`DELETE /families/current/members/{userId}` |
 | Accounts | `GET`/`POST /accounts` (`?closed=true` for your closed ones), `GET`/`PUT`/`DELETE /accounts/{id}`, `POST /accounts/{id}/close` |

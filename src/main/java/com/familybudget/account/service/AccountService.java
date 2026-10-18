@@ -31,6 +31,7 @@ import com.familybudget.account.repository.AccountRepository;
 import com.familybudget.common.exception.ApiException;
 import com.familybudget.common.exception.IdConflictException;
 import com.familybudget.common.exception.NotFoundException;
+import com.familybudget.common.model.AccessScope;
 import com.familybudget.common.model.SyncChanges;
 import com.familybudget.common.model.SyncWindow;
 import com.familybudget.common.service.SyncTombstones;
@@ -127,7 +128,9 @@ public class AccountService {
 		}
 		AccountEntity account = new AccountEntity(userId);
 		account.useClientId(request.id());
-		account.apply(request, grants(userId, request.grants()));
+		Map<UUID, GrantLevel> grants = grants(userId, request.grants());
+		requireNoWiderGrants(userId, Map.of(), grants);
+		account.apply(request, grants);
 		return view(userId, this.accounts.save(account));
 	}
 
@@ -135,7 +138,9 @@ public class AccountService {
 	public AccountView update(UUID userId, UUID id, AccountRequest request) {
 		AccountEntity account = owned(userId, id);
 		requireOpen(account);
-		account.apply(request, grants(userId, request.grants()));
+		Map<UUID, GrantLevel> grants = grants(userId, request.grants());
+		requireNoWiderGrants(userId, account.getGrants(), grants);
+		account.apply(request, grants);
 		return view(userId, account);
 	}
 
@@ -158,9 +163,13 @@ public class AccountService {
 		AccountEntity account = viewable(userId, id);
 		requireOpen(account);
 		requireRegular(account);
-		if (!account.accessFor(userId).canUse()) {
+		AccountAccess access = account.accessFor(userId);
+		if (!access.canUse()) {
 			throw new ApiException(HttpStatus.FORBIDDEN, "account-read-only",
 					"This account is only visible to you; you can't record transactions on it");
+		}
+		if (access != AccountAccess.OWNER && this.familyService.isFrozen(userId)) {
+			throw AccessScope.familyFrozen();
 		}
 		return account.toRef(userId);
 	}
@@ -288,6 +297,17 @@ public class AccountService {
 	private static void requireOpen(AccountEntity account) {
 		if (account.isClosed()) {
 			throw new ApiException(HttpStatus.CONFLICT, "account-closed", "This account is closed");
+		}
+	}
+
+	/** While the family is frozen, sharing may shrink but not grow (ARCHITECTURE.md §3.4). */
+	private void requireNoWiderGrants(UUID ownerId, Map<UUID, GrantLevel> current, Map<UUID, GrantLevel> requested) {
+		boolean wider = requested.entrySet()
+			.stream()
+			.anyMatch((grant) -> !current.containsKey(grant.getKey())
+					|| (current.get(grant.getKey()) == GrantLevel.VISIBLE && grant.getValue() == GrantLevel.SHARED));
+		if (wider && this.familyService.isFrozen(ownerId)) {
+			throw AccessScope.familyFrozen();
 		}
 	}
 

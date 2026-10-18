@@ -38,6 +38,7 @@ import com.familybudget.family.repository.FamilyInvitationRepository;
 import com.familybudget.family.repository.FamilyJoinRequestRepository;
 import com.familybudget.family.repository.FamilyMemberRepository;
 import com.familybudget.family.repository.FamilyRepository;
+import com.familybudget.subscription.service.SubscriptionService;
 import com.familybudget.user.model.UserView;
 import com.familybudget.user.service.UserService;
 
@@ -62,18 +63,21 @@ public class FamilyService {
 
 	private final UserService userService;
 
+	private final SubscriptionService subscriptionService;
+
 	private final ApplicationEventPublisher events;
 
 	private final Duration inviteTtl;
 
 	FamilyService(FamilyRepository families, FamilyMemberRepository members, FamilyInvitationRepository invitations,
-			FamilyJoinRequestRepository joinRequests, UserService userService, ApplicationEventPublisher events,
-			@Value("${app.family.invite-ttl}") Duration inviteTtl) {
+			FamilyJoinRequestRepository joinRequests, UserService userService, SubscriptionService subscriptionService,
+			ApplicationEventPublisher events, @Value("${app.family.invite-ttl}") Duration inviteTtl) {
 		this.families = families;
 		this.members = members;
 		this.invitations = invitations;
 		this.joinRequests = joinRequests;
 		this.userService = userService;
+		this.subscriptionService = subscriptionService;
 		this.events = events;
 		this.inviteTtl = inviteTtl;
 	}
@@ -112,7 +116,15 @@ public class FamilyService {
 	}
 
 	public AccessScope scopeFor(UUID userId) {
-		return new AccessScope(userId, currentFamilyId(userId).orElse(null));
+		return currentFamilyId(userId)
+			.map((familyId) -> new AccessScope(userId, familyId,
+					frozen(this.members.findByFamilyIdOrderByJoinedAt(familyId))))
+			.orElseGet(() -> new AccessScope(userId, null, false));
+	}
+
+	/** Whether the user's family is frozen: shared data is read-only (ARCHITECTURE.md §3.4). */
+	public boolean isFrozen(UUID userId) {
+		return scopeFor(userId).frozen();
 	}
 
 	public FamilyView current(UUID userId) {
@@ -152,6 +164,7 @@ public class FamilyService {
 	public InvitationView invite(UUID userId, String email) {
 		UUID familyId = requireAdmin(userId).getFamilyId();
 		lockFamily(familyId);
+		requireEntitled(familyId);
 		String normalizedEmail = UserService.normalizeEmail(email);
 		boolean alreadyMember = this.userService.findByEmail(normalizedEmail)
 			.flatMap((user) -> this.members.findById(user.id()))
@@ -232,6 +245,7 @@ public class FamilyService {
 			invitation.close(InvitationStatus.ACCEPTED, now);
 			return view(familyId);
 		}
+		requireEntitled(familyId);
 		// The accepted invitation's own seat becomes the new member's seat.
 		if (seatsTaken(familyId, now) > MAX_MEMBERS) {
 			throw familyFull();
@@ -335,6 +349,7 @@ public class FamilyService {
 		UUID familyId = requireAdmin(userId).getFamilyId();
 		lockFamily(familyId);
 		FamilyJoinRequestEntity request = incomingJoinRequest(familyId, requestId);
+		requireEntitled(familyId);
 		Instant now = Instant.now();
 		if (seatsTaken(familyId, now) >= MAX_MEMBERS) {
 			throw familyFull();
@@ -459,6 +474,26 @@ public class FamilyService {
 		return this.userService.get(userId);
 	}
 
+	/** One of the family's admins has a subscription (ARCHITECTURE.md §3.4). */
+	private boolean entitled(List<FamilyMemberEntity> familyMembers) {
+		return this.subscriptionService.anyEntitled(familyMembers.stream()
+			.filter((member) -> member.getRole() == FamilyRole.ADMIN)
+			.map(FamilyMemberEntity::getUserId)
+			.toList());
+	}
+
+	private boolean frozen(List<FamilyMemberEntity> familyMembers) {
+		return familyMembers.size() > 1 && !entitled(familyMembers);
+	}
+
+	/** Adding members is the paid part: invites, accepting one, approving a join request. */
+	private void requireEntitled(UUID familyId) {
+		if (!entitled(this.members.findByFamilyIdOrderByJoinedAt(familyId))) {
+			throw new ApiException(HttpStatus.FORBIDDEN, "subscription-required",
+					"Adding family members needs a family admin's subscription");
+		}
+	}
+
 	private long seatsTaken(UUID familyId, Instant now) {
 		return this.members.countByFamilyId(familyId)
 				+ this.invitations.countByFamilyIdAndStatusAndExpiresAtAfter(familyId, InvitationStatus.PENDING, now);
@@ -512,7 +547,9 @@ public class FamilyService {
 			return new FamilyView.Member(member.getUserId(), user.email(), user.displayName(), member.getRole(),
 					member.getJoinedAt());
 		}).toList();
-		return new FamilyView(familyId, family.getName(), memberViews, family.categoriesReviewed());
+		boolean entitled = entitled(familyMembers);
+		return new FamilyView(familyId, family.getName(), memberViews, family.categoriesReviewed(), entitled,
+				familyMembers.size() > 1 && !entitled);
 	}
 
 	private static InvitationView invitationView(FamilyInvitationEntity invitation) {

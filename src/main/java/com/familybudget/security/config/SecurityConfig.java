@@ -37,6 +37,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import com.familybudget.security.service.GoogleIdTokenVerifier;
+import com.familybudget.security.service.GooglePlayPushVerifier;
 import com.familybudget.security.service.SessionVersionValidator;
 import com.familybudget.security.web.OAuth2LoginSuccessHandler;
 import com.familybudget.security.web.ProblemResponses;
@@ -60,6 +61,9 @@ class SecurityConfig {
 
 	private static final String[] AUTH_PATHS = { "/api/v1/auth/refresh", "/api/v1/auth/logout",
 			"/api/v1/auth/google/mobile", "/api/v1/auth/mobile/refresh", "/api/v1/auth/mobile/logout" };
+
+	/** Authenticated by Google's OIDC token, which isn't one of our access tokens. */
+	private static final String GOOGLE_PLAY_WEBHOOK = "/api/v1/webhooks/google-play";
 
 	@Bean
 	@Order(1)
@@ -90,6 +94,7 @@ class SecurityConfig {
 				.requestMatchers(EndpointRequest.to(HealthEndpoint.class)).permitAll()
 				.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 				.requestMatchers(HttpMethod.POST, AUTH_PATHS).permitAll()
+				.requestMatchers(HttpMethod.POST, GOOGLE_PLAY_WEBHOOK).permitAll()
 				.anyRequest().authenticated())
 			.exceptionHandling((exceptions) -> exceptions
 				.authenticationEntryPoint(ProblemResponses.authenticationEntryPoint())
@@ -104,12 +109,13 @@ class SecurityConfig {
 
 	/**
 	 * Ignores the Authorization header on the auth endpoints, so an expired access token
-	 * sent along with {@code /auth/refresh} doesn't get the refresh itself rejected.
+	 * sent along with {@code /auth/refresh} doesn't get the refresh itself rejected, and on
+	 * the Google Play webhook, whose bearer token is Google's.
 	 */
 	private static BearerTokenResolver bearerTokenResolver() {
 		DefaultBearerTokenResolver delegate = new DefaultBearerTokenResolver();
-		return (request) -> request.getRequestURI().startsWith(RefreshTokenCookies.PATH + "/") ? null
-				: delegate.resolve(request);
+		return (request) -> (request.getRequestURI().startsWith(RefreshTokenCookies.PATH + "/")
+				|| request.getRequestURI().equals(GOOGLE_PLAY_WEBHOOK)) ? null : delegate.resolve(request);
 	}
 
 	/** Not a {@code JwtDecoder} bean: that would clash with the resource server's. */
@@ -118,6 +124,14 @@ class SecurityConfig {
 			@Value("${spring.security.oauth2.client.registration.google.client-id}") String clientId) {
 		return new GoogleIdTokenVerifier(NimbusJwtDecoder.withJwkSetUri(GoogleIdTokenVerifier.JWK_SET_URI).build(),
 				clientId);
+	}
+
+	@Bean
+	GooglePlayPushVerifier googlePlayPushVerifier(
+			@Value("${app.subscription.google-play.push-audience}") String audience,
+			@Value("${app.subscription.google-play.push-service-account}") String serviceAccount) {
+		return new GooglePlayPushVerifier(new GoogleIdTokenVerifier(
+				NimbusJwtDecoder.withJwkSetUri(GoogleIdTokenVerifier.JWK_SET_URI).build(), audience), serviceAccount);
 	}
 
 	@Bean

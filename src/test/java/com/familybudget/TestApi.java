@@ -95,6 +95,7 @@ public final class TestApi {
 
 	/** Invites {@code member} into {@code admin}'s family and accepts as {@code member}. */
 	public MvcTestResult join(Session admin, Session member) {
+		subscribe(admin);
 		UUID invitationId = id(invite(admin, member.email()));
 		return postEmpty(member, "/api/v1/invitations/{id}/accept", invitationId);
 	}
@@ -114,6 +115,19 @@ public final class TestApi {
 	/** A POST without a body, e.g. accepting an invitation. */
 	public MvcTestResult postEmpty(Session session, String uri, Object... vars) {
 		return this.mvc.post().uri(uri, vars).header(HttpHeaders.AUTHORIZATION, session.bearer()).exchange();
+	}
+
+	/**
+	 * Gives the user a manual subscription (ARCHITECTURE.md §3.4), as an operator would by
+	 * hand; a second call adds nothing.
+	 */
+	public Session subscribe(Session session) {
+		this.jdbc.update("""
+				INSERT INTO subscriptions (user_id, source, state)
+				SELECT ?, 'MANUAL', 'ACTIVE' WHERE NOT EXISTS
+				    (SELECT 1 FROM subscriptions WHERE user_id = ? AND source = 'MANUAL')""", session.userId(),
+				session.userId());
+		return session;
 	}
 
 	/**

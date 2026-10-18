@@ -24,6 +24,7 @@ import com.familybudget.account.service.AccountService;
 import com.familybudget.category.service.CategoryService;
 import com.familybudget.common.exception.ApiException;
 import com.familybudget.common.exception.NotFoundException;
+import com.familybudget.common.model.AccessScope;
 import com.familybudget.family.event.FamilyMembershipEnded;
 import com.familybudget.family.service.FamilyService;
 import com.familybudget.transaction.entity.TransactionEntity;
@@ -97,6 +98,10 @@ public class FamilyTransferService {
 				|| !family.equals(this.familyService.currentFamilyId(recipientId))) {
 			throw new ApiException(HttpStatus.CONFLICT, "recipient-not-in-family",
 					"Money can only be sent to another member of your family");
+		}
+		// Collecting and taking back stay open, so money already in transit isn't stuck.
+		if (this.familyService.isFrozen(userId)) {
+			throw AccessScope.familyFrozen();
 		}
 		TransientAccountView transit = this.accountService.openTransient(userId, recipientId, from.currency());
 		this.accountService.adjustBalance(from.id(), amount.negate());

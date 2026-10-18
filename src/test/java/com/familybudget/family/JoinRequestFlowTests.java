@@ -124,7 +124,7 @@ class JoinRequestFlowTests {
 
 	@Test
 	void approvingRespectsTheSeatLimit() {
-		Session alice = TestUsers.register(this.mvc);
+		Session alice = this.api.subscribe(TestUsers.register(this.mvc));
 		Session dave = TestUsers.register(this.mvc);
 		UUID requestId = TestApi.id(ask(dave, alice.email()));
 		// 1 member + 9 invitations = 10 seats; requests don't reserve one.

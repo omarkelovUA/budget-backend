@@ -53,3 +53,16 @@ app:
       allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
   family:
     invite-ttl: 7d
+  subscription:
+    google-play:
+      # The Android app's application id; Google's notifications for other apps are ignored.
+      package-name: ${GOOGLE_PLAY_PACKAGE_NAME:app.familybudget}
+      # Path to the service account's JSON key (ARCHITECTURE.md §3.4). Empty: purchases
+      # can't be checked, manual grants still work.
+      credentials: ${GOOGLE_PLAY_CREDENTIALS:}
+      # Google's notifications arrive as Pub/Sub pushes with an OIDC token for this
+      # audience, signed for this service account (ARCHITECTURE.md §6.1).
+      push-audience: ${GOOGLE_PLAY_PUSH_AUDIENCE:not-configured}
+      push-service-account: ${GOOGLE_PLAY_PUSH_SERVICE_ACCOUNT:not-configured}
+    # Daily re-check of Play purchases near or past their expiry (SubscriptionRecheck).
+    recheck-cron: '0 0 4 * * *'

@@ -39,6 +39,14 @@ services:
       FRONTEND_URL: 'https://${DOMAIN:?}'
       CORS_ALLOWED_ORIGINS: 'https://${DOMAIN:?}'
       REFRESH_COOKIE_SECURE: 'true'
+      # Google Play subscriptions (ARCHITECTURE.md §3.4). Until they're set, purchases can't
+      # be checked; manual grants still work.
+      GOOGLE_PLAY_CREDENTIALS: '${GOOGLE_PLAY_CREDENTIALS:-}'
+      GOOGLE_PLAY_PUSH_AUDIENCE: '${GOOGLE_PLAY_PUSH_AUDIENCE:-not-configured}'
+      GOOGLE_PLAY_PUSH_SERVICE_ACCOUNT: '${GOOGLE_PLAY_PUSH_SERVICE_ACCOUNT:-not-configured}'
+    volumes:
+      # The Play service account's JSON key lives in /opt/familybudget/secrets.
+      - './secrets:/run/secrets/familybudget:ro'
 
   web:
     image: 'ghcr.io/omarkelovua/budget-front:${WEB_TAG:?}'

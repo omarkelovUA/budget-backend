@@ -408,6 +408,76 @@ repository contracts stayed as they were:
 - The current user (`GET /users/me`) has no `familyId`; the family comes from
   `GET /families/current` (every user has one since M19).
 
+### 3.4 Family subscriptions
+
+Growing a family is the paid part of the app, sold as a Google Play subscription in the
+Android app (one product, `family_sharing`, with monthly and yearly base plans and a
+trial; prices live in Play Console). The `subscription` module keeps one
+`subscriptions` row per Play purchase or manual grant.
+
+- **Entitled family:** at least one of its current admins has a subscription that
+  entitles them now. That means a state of `active`, `in_grace` (Google retrying a failed
+  renewal) or `canceled` (won't renew), and not past `expires_at`. A manual grant counts
+  the same way; its `expires_at` may be null (no end). A member's own subscription
+  doesn't count, and the subscription follows its buyer: if they leave or stop being an
+  admin, the family loses it. Entitlement is computed on every request (no cache), so a
+  database change shows at once.
+- **Adding members needs it:** inviting, accepting an invitation into the family and
+  approving a join request get `403 subscription-required` otherwise.
+- **Frozen family:** more than one member and not entitled. Shared data turns read-only,
+  with `403 family-frozen` on:
+  - creating or sharing family categories, changing, deleting or hiding them;
+  - creating, changing or deleting shared budgets;
+  - recording on, or deleting transactions from, an account the caller doesn't own;
+  - giving new or wider grants on an account;
+  - sending a family transfer.
+
+  Everything else works: private data, the caller's own accounts (with family categories
+  too), narrowing grants, collecting and taking back money in transit (so it isn't
+  stuck), reading, leaving, removing members, changing roles, subscribing. A one-person
+  family is never frozen. `AccessScope.frozen` carries the state to the category, budget
+  and transaction services; accounts and transfers ask `FamilyService.isFrozen`.
+- `GET /families/current` includes `entitled` and `frozen`. `GET /subscriptions/me`
+  returns the caller's longest-lasting entitling subscription, else their latest one,
+  else `204`: `{source, state, productId, basePlanId, expiresAt, autoRenewing, active}`,
+  with `source` `google_play` or `manual`.
+
+**Buying** happens in the app with the Play Billing Library. The app tags the purchase
+with an obfuscated account id: the SHA-256 of the user id, lower-case hex
+(`SubscriptionService.accountIdFor`). It then sends the token to
+`POST /subscriptions/google-play {purchaseToken}`.
+- The backend reads the purchase from the Play Developer API
+  (`purchases.subscriptionsv2.get`, as the service account in `GOOGLE_PLAY_CREDENTIALS`).
+- It refuses a purchase tagged for someone else, or a token already stored for another
+  user, with `400 invalid-purchase`; a token Play doesn't know gets the same.
+- Otherwise it stores the row and acknowledges the purchase (Play refunds purchases left
+  unacknowledged for 3 days; a `pending` one waits until it's paid).
+- A purchase that replaces another (upgrade, resubscribe: Play's `linkedPurchaseToken`)
+  marks the old row `expired`.
+- If Play can't be reached, or no credentials are configured, it's
+  `503 google-play-unavailable`. Sending a token again is harmless, so the app retries
+  unacknowledged purchases on start.
+
+**Keeping up to date:** Google's real-time developer notifications arrive through
+Pub/Sub as pushes to `POST /webhooks/google-play`, authenticated as in §6.1.
+- The message is only a pointer: the backend re-reads that purchase from Play.
+- Test notifications, other apps' notifications and tokens no app has reported yet get a
+  `204` too, so Pub/Sub doesn't retry them.
+- `SubscriptionRecheck` re-reads, every night, Play rows expiring within 3 days or
+  already past expiry but not marked `expired`, in case a notification was lost.
+
+**Manual grants** (testing; later the operator page) are rows with `source = 'MANUAL'`.
+The table's defaults keep the SQL short:
+
+```sql
+-- grant (no end; set expires_at for a dated one)
+INSERT INTO subscriptions (user_id, source, state)
+SELECT id, 'MANUAL', 'ACTIVE' FROM users WHERE email = 'someone@gmail.com';
+-- revoke
+DELETE FROM subscriptions s USING users u
+WHERE s.user_id = u.id AND s.source = 'MANUAL' AND u.email = 'someone@gmail.com';
+```
+
 ## 4. Client contract
 
 The Angular SPA (its stack, structure and auth handling) is described in the
@@ -475,6 +545,7 @@ com.familybudget
   category/
   transaction/
   budget/
+  subscription/      # Play purchases, Google's notifications, manual grants (§3.4)
   sync/              # the mobile app's change feed (§6.5); depends on all of the above
 
 com.familybudget.<module>
@@ -494,8 +565,9 @@ another module touches them. Cross-feature calls go through the other feature's
 `*Service`, never its repository — keeps future extraction into separate services possible
 without a rewrite. Each sub-package of a feature module is `@NullMarked`.
 
-`security` depends on `user` (to find-or-create Google users), never
-the other way round. Controllers in any module get the caller's id via `common`'s
+`security` depends on `user` (to find-or-create Google users) and on `subscription` (its
+webhook passes Google's notifications on), never the other way round. `family` depends on
+`subscription` to decide entitlement; `subscription` depends only on `common`. Controllers in any module get the caller's id via `common`'s
 `@CurrentUserId UUID` parameter (the JWT `sub`), so feature modules never depend on
 `security`.
 
@@ -555,6 +627,7 @@ Problem types so far: `not-found`, `invalid-refresh-token`, `email-not-verified`
 `transient-account`, `recipient-not-in-family`, `insufficient-in-transit`,
 `unsupported-language`, `invalid-used-currencies`, `default-currency-not-used`,
 `unsupported-theme`, `invalid-google-token`, `google-unavailable`,
+`subscription-required`, `family-frozen`, `invalid-purchase`, `google-play-unavailable`,
 `id-conflict`, `already-deleted`,
 `invalid-sync-cursor`, `validation-failed`.
 
@@ -622,6 +695,15 @@ signature (keys from `https://www.googleapis.com/oauth2/v3/certs`), issuer
 `401 invalid-google-token`. If Google's keys can't be fetched, the token may be fine, so
 that's logged and answered `503 google-unavailable` instead.
 
+Google Play's notifications (§3.4) come as Pub/Sub pushes to `POST /webhooks/google-play`,
+which our access-token check ignores. Instead `GooglePlayPushVerifier` checks the OIDC
+token Pub/Sub sends as the bearer, reusing `GoogleIdTokenVerifier`:
+- Google's signature and issuer, an audience of `GOOGLE_PLAY_PUSH_AUDIENCE`;
+- an `email` equal to `GOOGLE_PLAY_PUSH_SERVICE_ACCOUNT`, with `email_verified`.
+
+Anything else is `401 unauthenticated`; unreachable Google keys stay a `503`, so Pub/Sub
+retries.
+
 No hand-written JWT filter: tokens are issued with Spring Security's `NimbusJwtEncoder`
 and validated by its OAuth2 Resource Server support (`NimbusJwtDecoder`), signed with an
 HMAC key from configuration (`JWT_SECRET`). Switching to an asymmetric key pair later
@@ -681,6 +763,8 @@ only changes those two beans.
 - A family always keeps at least one `ADMIN`: the last admin can't be demoted, and if
   they leave, the longest-standing member takes over. A family is deleted only when its
   last member moves to another one.
+- Adding members needs an admin's subscription, and a family with members but none is
+  frozen: its shared data is read-only (§3.4).
 - Email invitations and join requests can only be used by an account whose email is
   verified (Google-linked), since the email is the only thing tying them to a person
   (§3.2).

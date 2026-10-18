@@ -21,14 +21,20 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 
 import com.familybudget.security.service.GoogleIdTokenVerifier;
+import com.familybudget.security.service.GooglePlayPushVerifier;
 
 /**
- * Google ID tokens signed with a local RSA key instead of Google's, plus a verifier
- * that trusts that key. {@link Config} puts the verifier into every integration test.
+ * Google ID tokens (and Pub/Sub's push tokens, which are the same kind) signed with a
+ * local RSA key instead of Google's, plus verifiers that trust that key. {@link Config} puts the verifier into every integration test.
  */
 public final class TestGoogleIdTokens {
 
 	public static final String CLIENT_ID = "test-google-client";
+
+	/** What Pub/Sub's push tokens for Google Play's notifications are issued for. */
+	public static final String PUSH_AUDIENCE = "https://test.familybudget.app/api/v1/webhooks/google-play";
+
+	public static final String PUSH_SERVICE_ACCOUNT = "play-push@test-project.iam.gserviceaccount.com";
 
 	private static final KeyPair KEYS = generateKeyPair();
 
@@ -40,6 +46,14 @@ public final class TestGoogleIdTokens {
 	/** A valid token for a new Google user; {@code customizer} overrides any claim. */
 	public static String sign(Consumer<JwtClaimsSet.Builder> customizer) {
 		return sign(KEYS, customizer);
+	}
+
+	/** A valid Pub/Sub push token; {@code customizer} overrides any claim. */
+	public static String signPush(Consumer<JwtClaimsSet.Builder> customizer) {
+		return sign(KEYS, (claims) -> {
+			claims.audience(List.of(PUSH_AUDIENCE)).claim("email", PUSH_SERVICE_ACCOUNT).claims((all) -> all.remove("name"));
+			customizer.accept(claims);
+		});
 	}
 
 	/** Valid claims, but not signed by the trusted key. */
@@ -91,6 +105,14 @@ public final class TestGoogleIdTokens {
 		@Primary
 		GoogleIdTokenVerifier testGoogleIdTokenVerifier() {
 			return verifier();
+		}
+
+		@Bean
+		@Primary
+		GooglePlayPushVerifier testGooglePlayPushVerifier() {
+			return new GooglePlayPushVerifier(new GoogleIdTokenVerifier(
+					NimbusJwtDecoder.withPublicKey((RSAPublicKey) KEYS.getPublic()).build(), PUSH_AUDIENCE),
+					PUSH_SERVICE_ACCOUNT);
 		}
 
 	}

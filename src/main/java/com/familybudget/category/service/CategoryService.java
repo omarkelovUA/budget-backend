@@ -146,6 +146,7 @@ public class CategoryService {
 		AccessScope scope = this.familyService.scopeFor(userId);
 		CategoryEntity category = accessible(scope, id);
 		requireManageable(userId, category);
+		scope.requireWritable(category.getOwnerType());
 		if (Visibility.of(category.getOwnerType()) != request.visibility()) {
 			throw new ApiException(HttpStatus.CONFLICT, "visibility-immutable",
 					"A category can't be moved between private and shared");
@@ -166,8 +167,10 @@ public class CategoryService {
 
 	@Transactional
 	public void delete(UUID userId, UUID id) {
-		CategoryEntity category = accessible(this.familyService.scopeFor(userId), id);
+		AccessScope scope = this.familyService.scopeFor(userId);
+		CategoryEntity category = accessible(scope, id);
 		requireManageable(userId, category);
+		scope.requireWritable(category.getOwnerType());
 		try {
 			this.categories.delete(category);
 			this.categories.flush();
@@ -203,6 +206,7 @@ public class CategoryService {
 	@Transactional
 	public CategoryView hide(UUID userId, UUID id) {
 		UUID familyId = this.familyService.requireAdminOf(userId);
+		this.familyService.scopeFor(userId).requireWritable(OwnerType.FAMILY);
 		CategoryEntity category = this.categories.findById(id)
 			.filter((c) -> c.getOwnerType() == OwnerType.FAMILY && c.getOwnerId().equals(familyId))
 			.orElseThrow(() -> new NotFoundException("Category not found"));

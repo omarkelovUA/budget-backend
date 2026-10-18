@@ -73,7 +73,7 @@ class FamilyFlowTests {
 
 	@Test
 	void invitationLetsTheOwnerOfThatEmailJoin() {
-		Session alice = TestUsers.register(this.mvc);
+		Session alice = this.api.subscribe(TestUsers.register(this.mvc));
 		Session bob = TestUsers.register(this.mvc);
 		Session carol = TestUsers.register(this.mvc);
 		rename(alice, "Smiths");
@@ -109,7 +109,7 @@ class FamilyFlowTests {
 
 	@Test
 	void anEmailCanBeInvitedBeforeItHasAnAccount() {
-		Session alice = TestUsers.register(this.mvc);
+		Session alice = this.api.subscribe(TestUsers.register(this.mvc));
 		rename(alice, "Smiths");
 		String email = TestUsers.uniqueEmail();
 
@@ -123,7 +123,7 @@ class FamilyFlowTests {
 
 	@Test
 	void invitationsNeedAnEmailVerifiedByGoogle() {
-		Session alice = TestUsers.register(this.mvc);
+		Session alice = this.api.subscribe(TestUsers.register(this.mvc));
 		Session bob = this.api.unlinkGoogle(TestUsers.register(this.mvc));
 		rename(alice, "Smiths");
 		UUID invitationId = TestApi.id(this.api.invite(alice, bob.email()));
@@ -166,7 +166,7 @@ class FamilyFlowTests {
 
 	@Test
 	void duplicateInvitationsAndInvitingMembersAreRejected() {
-		Session alice = TestUsers.register(this.mvc);
+		Session alice = this.api.subscribe(TestUsers.register(this.mvc));
 		Session bob = TestUsers.register(this.mvc);
 		rename(alice, "Smiths");
 
@@ -202,7 +202,7 @@ class FamilyFlowTests {
 
 	@Test
 	void declinedAndRevokedInvitationsCanNoLongerBeAccepted() {
-		Session alice = TestUsers.register(this.mvc);
+		Session alice = this.api.subscribe(TestUsers.register(this.mvc));
 		Session bob = TestUsers.register(this.mvc);
 		Session carol = TestUsers.register(this.mvc);
 		rename(alice, "Smiths");
