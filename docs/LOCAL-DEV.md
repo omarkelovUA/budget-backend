@@ -82,11 +82,13 @@ Open **<http://localhost:4200>**. Code changes reload the page automatically.
 
 ## 5. Try it out
 
-1. **Register** at <http://localhost:4200/register> (password ≥ 8 characters).
-2. You land on **Family** → create a family. Create accounts, categories, transactions
-   and budgets; the **Dashboard** sums them up.
+1. **Sign in with Google** at <http://localhost:4200/login>; the first sign-in creates
+   the account. This needs your own Google OAuth client (§7).
+2. You land on the **Dashboard**, with your own family, two accounts and the default
+   categories already there. Create transactions and budgets; the Dashboard sums them up.
 3. **Test sharing with a second user:** open a private/incognito window (or another
-   browser profile — sessions live in a per-profile cookie) and register a second user.
+   browser profile — sessions live in a per-profile cookie) and sign in with a second
+   Google account (a test user, §7).
    As the first user, click *Створити код запрошення* on the Family page; as the second
    user, paste the code into *Код запрошення* → *Приєднатися*. Now both see shared
    (`Сімейний`) accounts, categories, budgets and transactions, but not each other's
@@ -96,12 +98,11 @@ Open **<http://localhost:4200>**. Code changes reload the page automatically.
 
 ### Calling the API directly (optional)
 
+Sign in in the browser, then copy `accessToken` from the response of `/api/v1/auth/refresh`
+(DevTools → Network):
+
 ```bash
-# register and keep the access token
-TOKEN=$(curl -s -H 'Content-Type: application/json' \
-  -d '{"email":"me@example.com","password":"password123","displayName":"Me"}' \
-  localhost:8080/api/v1/auth/register | python3 -c 'import sys,json;print(json.load(sys.stdin)["accessToken"])')
-# (already registered? use /api/v1/auth/login with email + password instead)
+TOKEN=...
 
 curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/v1/users/me
 curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/v1/accounts
@@ -135,9 +136,10 @@ npm test                      # watch mode: re-runs on every change
 npx ng build                  # production build into dist/ (catches template/type errors)
 ```
 
-## 7. Optional: Google login
+## 7. Google login
 
-Works only with your own Google OAuth client (everything else works without it):
+Signing in is Google-only, so using the app needs your own Google OAuth client (the
+tests don't):
 
 1. Google Cloud Console → *APIs & Services* → *Credentials* → *Create OAuth client ID*,
    type *Web application*, redirect URI `http://localhost:4200/login/oauth2/code/google`.

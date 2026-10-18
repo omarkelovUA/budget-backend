@@ -74,8 +74,8 @@ class FamilyFlowTests {
 	@Test
 	void invitationLetsTheOwnerOfThatEmailJoin() {
 		Session alice = TestUsers.register(this.mvc);
-		Session bob = verified(TestUsers.register(this.mvc));
-		Session carol = verified(TestUsers.register(this.mvc));
+		Session bob = TestUsers.register(this.mvc);
+		Session carol = TestUsers.register(this.mvc);
 		rename(alice, "Smiths");
 
 		MvcTestResult invited = this.api.invite(alice, bob.email().toUpperCase());
@@ -115,7 +115,7 @@ class FamilyFlowTests {
 
 		assertThat(this.api.invite(alice, email)).hasStatus(HttpStatus.CREATED);
 
-		Session newcomer = verified(TestUsers.register(this.mvc, email));
+		Session newcomer = TestUsers.register(this.mvc, email);
 		assertThat(this.api.get(newcomer, "/api/v1/invitations")).bodyJson()
 			.extractingPath("$[0].familyName")
 			.isEqualTo("Smiths");
@@ -124,7 +124,7 @@ class FamilyFlowTests {
 	@Test
 	void invitationsNeedAnEmailVerifiedByGoogle() {
 		Session alice = TestUsers.register(this.mvc);
-		Session bob = TestUsers.register(this.mvc);
+		Session bob = this.api.unlinkGoogle(TestUsers.register(this.mvc));
 		rename(alice, "Smiths");
 		UUID invitationId = TestApi.id(this.api.invite(alice, bob.email()));
 
@@ -175,7 +175,6 @@ class FamilyFlowTests {
 
 		UUID invitationId = UUID.fromString(TestUsers.json(this.api.get(alice, "/api/v1/families/current/invitations"),
 				"$[0].id"));
-		this.api.verifyEmail(bob);
 		assertThat(accept(bob, invitationId)).hasStatusOk();
 		assertProblem(this.api.invite(alice, bob.email()), HttpStatus.CONFLICT, "already-member");
 	}
@@ -204,8 +203,8 @@ class FamilyFlowTests {
 	@Test
 	void declinedAndRevokedInvitationsCanNoLongerBeAccepted() {
 		Session alice = TestUsers.register(this.mvc);
-		Session bob = verified(TestUsers.register(this.mvc));
-		Session carol = verified(TestUsers.register(this.mvc));
+		Session bob = TestUsers.register(this.mvc);
+		Session carol = TestUsers.register(this.mvc);
 		rename(alice, "Smiths");
 		UUID bobsInvitation = TestApi.id(this.api.invite(alice, bob.email()));
 		UUID carolsInvitation = TestApi.id(this.api.invite(alice, carol.email()));
@@ -345,11 +344,6 @@ class FamilyFlowTests {
 		MvcTestResult bobsFamily = this.api.get(bob, "/api/v1/families/current");
 		assertThat(bobsFamily).bodyJson().extractingPath("$.members.length()").isEqualTo(1);
 		assertThat(bobsFamily).bodyJson().extractingPath("$.members[0].role").isEqualTo("admin");
-	}
-
-	private Session verified(Session session) {
-		this.api.verifyEmail(session);
-		return session;
 	}
 
 	private MvcTestResult rename(Session session, String name) {

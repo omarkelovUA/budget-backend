@@ -35,9 +35,7 @@ public class UserEntity {
 	@Column(nullable = false)
 	private String displayName;
 
-	/** Null for users who only ever signed in with Google. */
-	private @Nullable String passwordHash;
-
+	/** Null only for accounts left from before sign-in was Google-only. */
 	private @Nullable String googleSubject;
 
 	/** ISO 4217; picked from the region at sign-up, then changed in settings. */
@@ -109,14 +107,6 @@ public class UserEntity {
 		return this.displayName;
 	}
 
-	public @Nullable String getPasswordHash() {
-		return this.passwordHash;
-	}
-
-	public void setPasswordHash(String passwordHash) {
-		this.passwordHash = passwordHash;
-	}
-
 	@Nullable public String getGoogleSubject() {
 		return this.googleSubject;
 	}
@@ -130,12 +120,11 @@ public class UserEntity {
 	}
 
 	/**
-	 * Google just proved who owns this email, while the password was set by whoever
-	 * registered it, unverified. Dropping the password and every session locks out anyone
-	 * who squatted the address before its owner showed up.
+	 * Google just proved who owns this email, while whoever registered the account with a
+	 * password never did. Ending every session locks out anyone who squatted the address
+	 * before its owner showed up.
 	 */
 	public void reclaimForVerifiedOwner() {
-		this.passwordHash = null;
 		this.sessionVersion++;
 	}
 

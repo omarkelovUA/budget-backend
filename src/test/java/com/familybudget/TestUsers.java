@@ -7,16 +7,17 @@ import java.util.UUID;
 
 import com.jayway.jsonpath.JsonPath;
 import jakarta.servlet.http.Cookie;
+import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
-/** Registers throwaway users through the real API so tests don't depend on each other. */
+/**
+ * Signs up throwaway Google users through the real API (with {@link TestGoogleIdTokens})
+ * so tests don't depend on each other.
+ */
 public final class TestUsers {
-
-	public static final String PASSWORD = "correct-horse-battery";
 
 	private TestUsers() {
 	}
@@ -30,27 +31,30 @@ public final class TestUsers {
 	}
 
 	public static Session register(MockMvcTester mvc, String email) {
-		MvcTestResult result = mvc.post()
-			.uri("/api/v1/auth/register")
-			.contentType(MediaType.APPLICATION_JSON)
-			.content("""
-					{"email": "%s", "displayName": "Test User", "password": "%s"}
-					""".formatted(email, PASSWORD))
-			.exchange();
-		assertThat(result).hasStatus(HttpStatus.CREATED);
-		return Session.from(result);
+		return signUp(mvc, email, null);
 	}
 
 	/** Signs up from a browser whose language is {@code acceptLanguage}. */
 	public static Session registerIn(MockMvcTester mvc, String acceptLanguage) {
-		return Session.from(mvc.post()
-			.uri("/api/v1/auth/register")
-			.header(HttpHeaders.ACCEPT_LANGUAGE, acceptLanguage)
+		return signUp(mvc, uniqueEmail(), acceptLanguage);
+	}
+
+	private static Session signUp(MockMvcTester mvc, String email, @Nullable String acceptLanguage) {
+		String idToken = TestGoogleIdTokens.sign((claims) -> claims.claim("email", email).claim("name", "Test User"));
+		var request = mvc.post()
+			.uri("/api/v1/auth/google/mobile")
 			.contentType(MediaType.APPLICATION_JSON)
 			.content("""
-					{"email": "%s", "displayName": "Test User", "password": "%s"}
-					""".formatted(uniqueEmail(), PASSWORD))
-			.exchange());
+					{"idToken": "%s", "confirmLink": false}
+					""".formatted(idToken));
+		if (acceptLanguage != null) {
+			request = request.header(HttpHeaders.ACCEPT_LANGUAGE, acceptLanguage);
+		}
+		MvcTestResult result = request.exchange();
+		assertThat(result).hasStatusOk();
+		// Web and mobile sessions share one refresh-token store; only the transport differs.
+		return new Session(UUID.fromString(json(result, "$.user.id")), json(result, "$.user.email"),
+				json(result, "$.accessToken"), new Cookie("refresh_token", json(result, "$.refreshToken")));
 	}
 
 	public static String json(MvcTestResult result, String path) {
@@ -63,13 +67,6 @@ public final class TestUsers {
 	}
 
 	public record Session(UUID userId, String email, String accessToken, Cookie refreshCookie) {
-
-		public static Session from(MvcTestResult result) {
-			Cookie cookie = result.getResponse().getCookie("refresh_token");
-			assertThat(cookie).isNotNull();
-			return new Session(UUID.fromString(json(result, "$.user.id")), json(result, "$.user.email"),
-					json(result, "$.accessToken"), cookie);
-		}
 
 		public String bearer() {
 			return "Bearer " + this.accessToken;

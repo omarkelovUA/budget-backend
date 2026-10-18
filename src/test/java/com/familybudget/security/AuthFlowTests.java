@@ -26,7 +26,7 @@ import com.familybudget.TestUsers.Session;
 import com.familybudget.security.service.AccessTokenService;
 import com.familybudget.security.service.RefreshTokenCleanup;
 
-/** Password login path and refresh-token rotation (ARCHITECTURE.md §6.1, §6.2). */
+/** Web sessions and refresh-token rotation (ARCHITECTURE.md §6.1, §6.2). */
 @IntegrationTest
 class AuthFlowTests {
 
@@ -43,70 +43,11 @@ class AuthFlowTests {
 	private JwtEncoder jwtEncoder;
 
 	@Test
-	void registerIssuesAccessTokenAndHardenedRefreshCookie() {
-		String email = TestUsers.uniqueEmail();
-		MvcTestResult result = this.mvc.post()
-			.uri("/api/v1/auth/register")
-			.contentType(MediaType.APPLICATION_JSON)
-			.content("""
-					{"email": "%s", "displayName": "Alice", "password": "%s"}
-					""".formatted(email.toUpperCase(), TestUsers.PASSWORD))
-			.exchange();
-
-		assertThat(result).hasStatus(HttpStatus.CREATED);
-		assertThat(result).bodyJson().extractingPath("$.user.email").isEqualTo(email);
-		assertThat(result).bodyJson().extractingPath("$.tokenType").isEqualTo("Bearer");
-		assertThat(result).bodyJson().extractingPath("$.expiresIn").isEqualTo(900);
-		assertThat(result.getResponse().getHeader(HttpHeaders.SET_COOKIE)).contains("refresh_token=")
-			.contains("HttpOnly")
-			.contains("Secure")
-			.contains("SameSite=Strict")
-			.contains("Path=/api/v1/auth");
-	}
-
-	@Test
-	void registerRejectsDuplicateEmailCaseInsensitively() {
-		Session existing = TestUsers.register(this.mvc);
-
-		MvcTestResult result = register(existing.email().toUpperCase(), TestUsers.PASSWORD);
-
-		assertThat(result).hasStatus(HttpStatus.CONFLICT);
-		assertThat(result).bodyJson()
-			.extractingPath("$.type")
-			.isEqualTo("https://familybudget.app/problems/email-taken");
-	}
-
-	@Test
-	void registerValidatesInput() {
-		assertThat(register("not-an-email", TestUsers.PASSWORD)).hasStatus(HttpStatus.BAD_REQUEST);
-		assertThat(register(TestUsers.uniqueEmail(), "short")).hasStatus(HttpStatus.BAD_REQUEST);
-	}
-
-	@Test
-	void loginWithCorrectPasswordGivesAccessToTheApi() {
-		Session registered = TestUsers.register(this.mvc);
-
-		MvcTestResult login = login(registered.email(), TestUsers.PASSWORD);
-		assertThat(login).hasStatusOk();
-		Session session = sessionFrom(login);
-
-		assertThat(this.mvc.get().uri("/api/v1/users/me").header(HttpHeaders.AUTHORIZATION, session.bearer()))
-			.hasStatusOk()
-			.bodyJson()
-			.extractingPath("$.email")
-			.isEqualTo(registered.email());
-	}
-
-	@Test
-	void loginRejectsWrongPasswordAndUnknownEmailTheSameWay() {
-		Session registered = TestUsers.register(this.mvc);
-
-		for (MvcTestResult result : new MvcTestResult[] { login(registered.email(), "wrong-password"),
-				login(TestUsers.uniqueEmail(), TestUsers.PASSWORD) }) {
-			assertThat(result).hasStatus(HttpStatus.UNAUTHORIZED);
-			assertThat(result).bodyJson()
-				.extractingPath("$.type")
-				.isEqualTo("https://familybudget.app/problems/invalid-credentials");
+	void passwordLoginAndRegistrationAreGone() {
+		for (String path : List.of("/api/v1/auth/login", "/api/v1/auth/register")) {
+			assertThat(this.mvc.post().uri(path).contentType(MediaType.APPLICATION_JSON).content("""
+					{"email": "%s", "password": "correct-horse-battery", "displayName": "Test"}
+					""".formatted(TestUsers.uniqueEmail()))).hasStatus(HttpStatus.UNAUTHORIZED);
 		}
 	}
 
@@ -161,11 +102,18 @@ class AuthFlowTests {
 	}
 
 	@Test
-	void refreshRotatesTheRefreshToken() {
+	void refreshRotatesTheRefreshTokenInAHardenedCookie() {
 		Session session = TestUsers.register(this.mvc);
 
 		MvcTestResult refreshed = refresh(session.refreshCookie());
 		assertThat(refreshed).hasStatusOk();
+		assertThat(refreshed).bodyJson().extractingPath("$.tokenType").isEqualTo("Bearer");
+		assertThat(refreshed).bodyJson().extractingPath("$.expiresIn").isEqualTo(900);
+		assertThat(refreshed.getResponse().getHeader(HttpHeaders.SET_COOKIE)).contains("refresh_token=")
+			.contains("HttpOnly")
+			.contains("Secure")
+			.contains("SameSite=Strict")
+			.contains("Path=/api/v1/auth");
 		assertThat(refreshed).bodyJson().extractingPath("$.user.id").isEqualTo(session.userId().toString());
 		Cookie rotated = refreshed.getResponse().getCookie("refresh_token");
 		assertThat(rotated).isNotNull();
@@ -214,26 +162,6 @@ class AuthFlowTests {
 		assertThat(refresh(session.refreshCookie())).hasStatus(HttpStatus.UNAUTHORIZED);
 	}
 
-	private MvcTestResult register(String email, String password) {
-		return this.mvc.post()
-			.uri("/api/v1/auth/register")
-			.contentType(MediaType.APPLICATION_JSON)
-			.content("""
-					{"email": "%s", "displayName": "Test", "password": "%s"}
-					""".formatted(email, password))
-			.exchange();
-	}
-
-	private MvcTestResult login(String email, String password) {
-		return this.mvc.post()
-			.uri("/api/v1/auth/login")
-			.contentType(MediaType.APPLICATION_JSON)
-			.content("""
-					{"email": "%s", "password": "%s"}
-					""".formatted(email, password))
-			.exchange();
-	}
-
 	private MvcTestResult refresh(Cookie cookie) {
 		return this.mvc.post().uri("/api/v1/auth/refresh").cookie(cookie).exchange();
 	}
@@ -241,13 +169,6 @@ class AuthFlowTests {
 	private Integer countTokens(Session session) {
 		return this.jdbc.queryForObject("select count(*) from refresh_tokens where user_id = ?", Integer.class,
 				session.userId());
-	}
-
-	private static Session sessionFrom(MvcTestResult result) {
-		Cookie cookie = result.getResponse().getCookie("refresh_token");
-		assertThat(cookie).isNotNull();
-		return new Session(java.util.UUID.fromString(TestUsers.json(result, "$.user.id")),
-				TestUsers.json(result, "$.user.email"), TestUsers.json(result, "$.accessToken"), cookie);
 	}
 
 }

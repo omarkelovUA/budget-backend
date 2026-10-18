@@ -95,7 +95,6 @@ public final class TestApi {
 
 	/** Invites {@code member} into {@code admin}'s family and accepts as {@code member}. */
 	public MvcTestResult join(Session admin, Session member) {
-		verifyEmail(member);
 		UUID invitationId = id(invite(admin, member.email()));
 		return postEmpty(member, "/api/v1/invitations/{id}/accept", invitationId);
 	}
@@ -118,12 +117,12 @@ public final class TestApi {
 	}
 
 	/**
-	 * Marks the user as Google-linked, which is what makes their email count as verified
-	 * (UserService#hasVerifiedEmail). GoogleLoginTests covers the real linking path.
+	 * Turns the user into an account from before sign-in was Google-only: not linked, so
+	 * its email doesn't count as verified (UserService#hasVerifiedEmail).
 	 */
-	public void verifyEmail(Session session) {
-		this.jdbc.update("UPDATE users SET google_subject = ? WHERE id = ?", "google-" + session.userId(),
-				session.userId());
+	public Session unlinkGoogle(Session session) {
+		this.jdbc.update("UPDATE users SET google_subject = NULL WHERE id = ?", session.userId());
+		return session;
 	}
 
 	public MvcTestResult createAccount(Session owner, String name, String balance, String currency,

@@ -84,8 +84,8 @@ class MobileAuthTests {
 	}
 
 	@Test
-	void linkingAPasswordAccountNeedsConsent() {
-		Session existing = TestUsers.register(this.mvc);
+	void linkingAnOldPasswordAccountNeedsConsent() {
+		Session existing = new TestApi(this.mvc, this.jdbc).unlinkGoogle(TestUsers.register(this.mvc));
 		String token = TestGoogleIdTokens.sign((claims) -> claims.claim("email", existing.email()));
 
 		MvcTestResult refused = signIn(token, false);
@@ -94,13 +94,15 @@ class MobileAuthTests {
 		assertThat(refused).bodyJson()
 			.extractingPath("$.type")
 			.isEqualTo(TestApi.PROBLEMS + "google-link-confirmation-required");
-		assertThat(passwordLogin(existing.email())).hasStatusOk();
+		assertThat(me(existing.bearer())).hasStatusOk();
 
 		MvcTestResult linked = signIn(token, true);
 
 		assertThat(linked).hasStatusOk();
 		assertThat(linked).bodyJson().extractingPath("$.user.id").isEqualTo(existing.userId().toString());
-		assertThat(passwordLogin(existing.email())).hasStatus(HttpStatus.UNAUTHORIZED);
+		// Whoever made the account with a password is signed out.
+		assertThat(me(existing.bearer())).hasStatus(HttpStatus.UNAUTHORIZED);
+		assertThat(me("Bearer " + TestUsers.json(linked, "$.accessToken"))).hasStatusOk();
 	}
 
 	@Test
@@ -184,6 +186,10 @@ class MobileAuthTests {
 		return request.exchange();
 	}
 
+	private MvcTestResult me(String bearer) {
+		return this.mvc.get().uri("/api/v1/users/me").header(HttpHeaders.AUTHORIZATION, bearer).exchange();
+	}
+
 	private MvcTestResult mobile(String action, String refreshToken) {
 		return this.mvc.post()
 			.uri("/api/v1/auth/mobile/{action}", action)
@@ -191,16 +197,6 @@ class MobileAuthTests {
 			.content("""
 					{"refreshToken": "%s"}
 					""".formatted(refreshToken))
-			.exchange();
-	}
-
-	private MvcTestResult passwordLogin(String email) {
-		return this.mvc.post()
-			.uri("/api/v1/auth/login")
-			.contentType(MediaType.APPLICATION_JSON)
-			.content("""
-					{"email": "%s", "password": "%s"}
-					""".formatted(email, TestUsers.PASSWORD))
 			.exchange();
 	}
 

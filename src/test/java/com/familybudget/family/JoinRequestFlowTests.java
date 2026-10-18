@@ -39,7 +39,7 @@ class JoinRequestFlowTests {
 		Session alice = TestUsers.register(this.mvc);
 		Session carol = TestUsers.register(this.mvc);
 		this.api.family(alice, carol);
-		Session dave = verified(TestUsers.register(this.mvc));
+		Session dave = TestUsers.register(this.mvc);
 		UUID davesOldFamily = this.api.familyId(dave);
 
 		// Naming any member reaches the family, here a non-admin.
@@ -71,12 +71,12 @@ class JoinRequestFlowTests {
 	@Test
 	void onlySomeoneAloneWithAVerifiedEmailMayAskOnce() {
 		Session alice = TestUsers.register(this.mvc);
-		Session bob = verified(TestUsers.register(this.mvc));
+		Session bob = TestUsers.register(this.mvc);
 		this.api.family(alice, bob);
 		Session dave = TestUsers.register(this.mvc);
 
-		assertProblem(ask(dave, alice.email()), HttpStatus.FORBIDDEN, "email-not-verified");
-		verified(dave);
+		assertProblem(ask(this.api.unlinkGoogle(TestUsers.register(this.mvc)), alice.email()), HttpStatus.FORBIDDEN,
+				"email-not-verified");
 		assertProblem(ask(bob, dave.email()), HttpStatus.CONFLICT, "not-alone");
 		assertProblem(ask(dave, TestUsers.uniqueEmail()), HttpStatus.NOT_FOUND, "user-not-found");
 		assertProblem(ask(dave, dave.email()), HttpStatus.CONFLICT, "already-member");
@@ -98,7 +98,7 @@ class JoinRequestFlowTests {
 	@Test
 	void declinedRequestsCanNoLongerBeApproved() {
 		Session alice = TestUsers.register(this.mvc);
-		Session dave = verified(TestUsers.register(this.mvc));
+		Session dave = TestUsers.register(this.mvc);
 		UUID requestId = TestApi.id(ask(dave, alice.email()));
 
 		assertThat(this.api.postEmpty(alice, "/api/v1/families/current/join-requests/{id}/decline", requestId))
@@ -112,7 +112,7 @@ class JoinRequestFlowTests {
 	@Test
 	void aRequestIsMootOnceTheRequestersFamilyGrows() {
 		Session alice = TestUsers.register(this.mvc);
-		Session dave = verified(TestUsers.register(this.mvc));
+		Session dave = TestUsers.register(this.mvc);
 		Session erin = TestUsers.register(this.mvc);
 		UUID requestId = TestApi.id(ask(dave, alice.email()));
 
@@ -125,7 +125,7 @@ class JoinRequestFlowTests {
 	@Test
 	void approvingRespectsTheSeatLimit() {
 		Session alice = TestUsers.register(this.mvc);
-		Session dave = verified(TestUsers.register(this.mvc));
+		Session dave = TestUsers.register(this.mvc);
 		UUID requestId = TestApi.id(ask(dave, alice.email()));
 		// 1 member + 9 invitations = 10 seats; requests don't reserve one.
 		for (int i = 0; i < 9; i++) {
@@ -143,11 +143,6 @@ class JoinRequestFlowTests {
 
 	private MvcTestResult approve(Session admin, UUID requestId) {
 		return this.api.postEmpty(admin, "/api/v1/families/current/join-requests/{id}/approve", requestId);
-	}
-
-	private Session verified(Session session) {
-		this.api.verifyEmail(session);
-		return session;
 	}
 
 	private static void assertProblem(MvcTestResult result, HttpStatus status, String type) {

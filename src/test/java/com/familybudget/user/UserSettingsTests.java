@@ -4,9 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
@@ -37,8 +35,8 @@ class UserSettingsTests {
 
 	@Test
 	void signUpPicksTheSettingsFromTheClientsRegion() {
-		Session polish = registerWith("pl-PL,pl;q=0.9,en;q=0.8");
-		Session ukrainian = registerWith("uk-UA,uk;q=0.9");
+		Session polish = TestUsers.registerIn(this.mvc, "pl-PL,pl;q=0.9,en;q=0.8");
+		Session ukrainian = TestUsers.registerIn(this.mvc, "uk-UA,uk;q=0.9");
 		Session noHeader = TestUsers.register(this.mvc);
 
 		assertThat(this.api.get(polish, SETTINGS)).bodyJson().isLenientlyEqualTo("""
@@ -110,17 +108,6 @@ class UserSettingsTests {
 		assertThat(this.api.get(alice, SETTINGS)).bodyJson().isLenientlyEqualTo("""
 				{"language": "en", "defaultCurrency": "UAH", "usedCurrencies": ["UAH"], "theme": "system", "primaryHue": 150}
 				""");
-	}
-
-	private Session registerWith(String acceptLanguage) {
-		return Session.from(this.mvc.post()
-			.uri("/api/v1/auth/register")
-			.header(HttpHeaders.ACCEPT_LANGUAGE, acceptLanguage)
-			.contentType(MediaType.APPLICATION_JSON)
-			.content("""
-					{"email": "%s", "displayName": "Ola", "password": "%s"}
-					""".formatted(TestUsers.uniqueEmail(), TestUsers.PASSWORD))
-			.exchange());
 	}
 
 	private void assertProblem(Session session, String body, String type) {

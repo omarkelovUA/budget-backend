@@ -47,8 +47,8 @@ flowchart LR
 - **Frontend** is a single Angular SPA (see [frontend ARCHITECTURE.md][frontend-arch]).
 - **Backend** is a single Spring Boot modular-monolith (not microservices — scope doesn't
   justify the operational cost yet; see §8 for the tradeoff).
-- **Auth** has two entry points that both resolve to the same backend-issued JWT session:
-  password login (JWT) and OAuth2/OIDC login (Google first). See §6.
+- **Auth** is Google-only (OAuth2/OIDC): the web and mobile entry points both resolve to
+  the same backend-issued JWT session, and the first sign-in creates the account. See §6.
 - **Database** is one PostgreSQL instance; one schema, Flyway-versioned.
 
 ## 3. Domain model
@@ -75,8 +75,7 @@ erDiagram
         uuid id
         string email
         string displayName
-        string passwordHash "null if OAuth-only"
-        string googleSubject "null until Google login"
+        string googleSubject "null only for pre-Google-only accounts"
         int sessionVersion "bumped to end all sessions"
         string defaultCurrency "ISO 4217, from region at sign-up"
         string[] usedCurrencies "ISO 4217, offered by pickers"
@@ -267,8 +266,8 @@ Other ownership rules:
 fails with `400 unsupported-theme`. `primaryHue` is the OKLCH hue (0–359) the UI
 palette derives from; new users get 150 (a "dollar" green), and a missing or
 out-of-range value is a `400` validation error. The others are set at
-sign-up from the client's `Accept-Language` (password and Google sign-up alike; a linked
-Google account keeps its settings):
+sign-up from the client's `Accept-Language` (an old account that gets linked to Google
+keeps its settings):
 - `defaultCurrency`: the first locale whose country has a currency wins; a language
   without a country stands for its main country (`uk` → UA, `pl` → PL, …; widely shared
   languages like `en` are skipped); otherwise UAH. Unknown codes fail with
@@ -324,7 +323,7 @@ column on the user: `family_members` is keyed by `user_id`, so the membership ro
 user's current family (one source of truth, nothing to keep in sync). Other modules ask
 `FamilyService.currentFamilyId(userId)`.
 
-- **Own family:** sign-up (password or Google) publishes `UserRegistered`, and the family
+- **Own family:** sign-up (a first Google login) publishes `UserRegistered`, and the family
   module creates the user's own family in the same transaction: named "Family", or
   "Родина" for Ukrainian, with the user as its only member and admin. V18 gave one to
   every existing user without a family. There's no endpoint to create a family.
@@ -347,8 +346,8 @@ account yet); the invitation shows up for whoever signs in with that email
 mobile clients list pending invitations themselves.
 
 - Only a user whose email is verified may list, accept or decline invitations
-  (`403 email-not-verified`). Password registration doesn't verify the email, so in
-  practice that means the account is linked to Google.
+  (`403 email-not-verified`), i.e. one linked to Google. Every account is, except those
+  left from when password registration existed and never verified the email.
 - Accepting moves the user: they leave their current family first. If they were its last
   member, that family is deleted; if they were its only admin, the longest-standing
   remaining member becomes admin.
@@ -495,7 +494,7 @@ another module touches them. Cross-feature calls go through the other feature's
 `*Service`, never its repository — keeps future extraction into separate services possible
 without a rewrite. Each sub-package of a feature module is `@NullMarked`.
 
-`security` depends on `user` (to verify passwords and find-or-create Google users), never
+`security` depends on `user` (to find-or-create Google users), never
 the other way round. Controllers in any module get the caller's id via `common`'s
 `@CurrentUserId UUID` parameter (the JWT `sub`), so feature modules never depend on
 `security`.
@@ -545,8 +544,7 @@ JSON, wrong or missing parameters) keep its built-in `ProblemDetail`, but with t
 The frontend maps problem types to user-facing messages (§4), so this shape has to stay
 stable.
 
-Problem types so far: `not-found`, `email-taken`, `invalid-credentials`,
-`invalid-refresh-token`, `email-not-verified`, `unauthenticated`,
+Problem types so far: `not-found`, `invalid-refresh-token`, `email-not-verified`, `unauthenticated`,
 `invalid-invite`, `already-invited`, `already-member`, `family-full`, `admin-required`, `last-admin`, `cannot-remove-self`, `no-family`,
 `alone-in-family`, `not-alone`, `user-not-found`, `already-requested`, `invalid-join-request`,
 `visibility-immutable`, `category-type-immutable`, `account-in-use`, `category-in-use`,
@@ -570,7 +568,13 @@ handlers, alongside the standard `WWW-Authenticate: Bearer …` header.
 
 ## 6. Security design
 
-### 6.1 Three login paths, one session model
+### 6.1 Google-only sign-in, one session model
+
+There is no password: signing in with Google is the only way in, and the first sign-in
+creates the account (`UserRegistered`, §3). The SPA uses the web flow, the Android app its
+own; both end in the same session. Accounts made with a password before (only test data,
+V24 dropped `users.password_hash`) still exist and link by email on their first Google
+login (§6.2).
 
 ```mermaid
 sequenceDiagram
@@ -578,17 +582,13 @@ sequenceDiagram
     participant API as Spring Boot
     participant IDP as Google OAuth2
 
-    alt Password login
-        FE->>API: POST /api/v1/auth/login {email, password}
-        API->>API: verify password, issue access+refresh JWT
-        API-->>FE: access token (body) + refresh token (httpOnly cookie)
-    else OAuth2 login (server-side, Spring oauth2Login)
+    alt Web Google login (server-side, Spring oauth2Login)
         FE->>API: navigate to /oauth2/authorization/google
         API->>IDP: redirect, Authorization Code + PKCE
         IDP->>API: redirect back to /login/oauth2/code/google?code=...
         API->>IDP: exchange code for id_token (confidential client)
         API->>API: find-or-create User from verified id_token claims
-        API->>API: set refresh token (httpOnly cookie), same as password path
+        API->>API: set refresh token (httpOnly cookie)
         API-->>FE: redirect back to the SPA
         FE->>API: POST /api/v1/auth/refresh
         API-->>FE: access token (body)
@@ -604,8 +604,8 @@ sequenceDiagram
     API->>API: resource-server JWT support validates signature+expiry, loads auth context
 ```
 
-All paths converge on the same backend-issued JWT — the rest of the API never has to
-know whether a session started via password, the web Google login or the mobile app. This is the key simplification:
+Both paths converge on the same backend-issued JWT — the rest of the API never has to
+know whether a session started in the browser or the mobile app. This is the key simplification:
 OAuth2 is a *login method*, not a parallel authorization system.
 
 The Google flow runs entirely on the backend (Spring's `oauth2Login`, backend as a
@@ -620,8 +620,7 @@ signature (keys from `https://www.googleapis.com/oauth2/v3/certs`), issuer
 `https://accounts.google.com` or `accounts.google.com`, audience = our
 `GOOGLE_CLIENT_ID`, and a non-empty `sub` and `exp`. A bad token gets
 `401 invalid-google-token`. If Google's keys can't be fetched, the token may be fine, so
-that's logged and answered `503 google-unavailable` instead. There is no
-password sign-up or login from mobile.
+that's logged and answered `503 google-unavailable` instead.
 
 No hand-written JWT filter: tokens are issued with Spring Security's `NimbusJwtEncoder`
 and validated by its OAuth2 Resource Server support (`NimbusJwtDecoder`), signed with an
@@ -637,13 +636,11 @@ only changes those two beans.
   token issued before it fail validation on the next request (`SessionVersionValidator`,
   one primary-key lookup per request). `UserSessionsInvalidated` makes the security
   module revoke all of the user's refresh tokens in the same database transaction.
-- **Google reclaims an unverified account**: password sign-up never verifies the email.
-  So when a Google login (with a Google-verified email) links to an existing password
-  account, that account's password is removed and all of its sessions end as above.
-  Whoever registered the address first, possibly not its owner, is locked out. The cost
-  is that a genuine user who signed up with a password and later uses Google can only
-  sign in with Google from then on (there's no set-password flow yet). The web login
-  links straight away; the mobile app has to send `confirmLink: true`. Without it, an
+- **Google reclaims an unverified account**: password sign-up, back when it existed,
+  never verified the email. So when a Google login (with a Google-verified email) links
+  to such an account, all of its sessions end as above: whoever registered the address
+  first, possibly not its owner, is locked out. The web login links straight away; the
+  mobile app has to send `confirmLink: true`. Without it, an
   email that matches an unlinked account gets `409 google-link-confirmation-required`
   and nothing changes, so the app can warn the user first.
 - Longer-lived **refresh token** (30 days): an opaque random value, not a JWT, stored

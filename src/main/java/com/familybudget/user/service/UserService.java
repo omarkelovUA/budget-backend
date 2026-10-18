@@ -10,7 +10,6 @@ import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,46 +33,21 @@ public class UserService {
 
 	private final UserRepository users;
 
-	private final PasswordEncoder passwordEncoder;
-
 	private final ApplicationEventPublisher events;
 
 	public static final int MAX_USED_CURRENCIES = 20;
 
-	/** Compared against when the email is unknown, so login timing doesn't reveal it. */
-	private final String dummyPasswordHash;
-
-	UserService(UserRepository users, PasswordEncoder passwordEncoder, ApplicationEventPublisher events) {
+	UserService(UserRepository users, ApplicationEventPublisher events) {
 		this.users = users;
-		this.passwordEncoder = passwordEncoder;
 		this.events = events;
-		this.dummyPasswordHash = passwordEncoder.encode("dummy-password-for-timing");
-	}
-
-	@Transactional
-	public UserView register(String email, String displayName, String rawPassword, SignUpRegion region) {
-		String normalizedEmail = normalizeEmail(email);
-		if (this.users.existsByEmail(normalizedEmail)) {
-			throw new ApiException(HttpStatus.CONFLICT, "email-taken", "An account with this email already exists");
-		}
-		UserEntity user = new UserEntity(normalizedEmail, displayName.strip(), region);
-		user.setPasswordHash(this.passwordEncoder.encode(rawPassword));
-		return registered(this.users.save(user));
-	}
-
-	public Optional<UserView> authenticate(String email, String rawPassword) {
-		Optional<UserEntity> user = this.users.findByEmail(normalizeEmail(email));
-		String hash = user.map(UserEntity::getPasswordHash).orElse(null);
-		boolean matches = this.passwordEncoder.matches(rawPassword, (hash != null) ? hash : this.dummyPasswordHash);
-		return (matches && hash != null) ? user.map(UserEntity::toView) : Optional.empty();
 	}
 
 	/**
-	 * Finds the user for a Google login, linking an existing account with the same
-	 * (Google-verified) email or creating a new one. Password sign-up never verified that
-	 * email, so linking also removes the password and ends every existing session: whoever
-	 * registered it may not be the person Google just vouched for. Without
-	 * {@code confirmLink} such a link is refused, so the client can warn the user first.
+	 * Finds the user for a Google login, the only way in, or creates them. An account from
+	 * before that (made with a password, its email never verified) and with the same
+	 * Google-verified email gets linked, which ends its existing sessions: whoever made it
+	 * may not be the person Google just vouched for. Without {@code confirmLink} such a
+	 * link is refused, so the client can warn the user first.
 	 */
 	@Transactional
 	public UserView findOrCreateFromGoogle(String subject, @Nullable String email, boolean emailVerified,
@@ -172,8 +146,8 @@ public class UserService {
 	}
 
 	/**
-	 * Whether the user's email is known to be theirs. Password registration doesn't verify
-	 * it, so only an account linked to Google (which checked the email) counts.
+	 * Whether the user's email is known to be theirs: only an account linked to Google
+	 * (which checked the email) counts, not one left from the password days.
 	 */
 	public boolean hasVerifiedEmail(UUID id) {
 		return this.users.findById(id).map((user) -> user.getGoogleSubject() != null).orElse(false);

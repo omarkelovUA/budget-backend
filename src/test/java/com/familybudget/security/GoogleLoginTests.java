@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -23,6 +23,7 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 import com.familybudget.IntegrationTest;
+import com.familybudget.TestApi;
 import com.familybudget.TestUsers;
 import com.familybudget.TestUsers.Session;
 import com.familybudget.security.web.OAuth2LoginSuccessHandler;
@@ -36,6 +37,9 @@ class GoogleLoginTests {
 
 	@Autowired
 	private MockMvcTester mvc;
+
+	@Autowired
+	private JdbcTemplate jdbc;
 
 	@Autowired
 	private OAuth2LoginSuccessHandler successHandler;
@@ -67,8 +71,8 @@ class GoogleLoginTests {
 	}
 
 	@Test
-	void googleLoginWithAVerifiedEmailLinksTheExistingPasswordAccount() throws Exception {
-		Session existing = TestUsers.register(this.mvc);
+	void googleLoginWithAVerifiedEmailLinksAnOldPasswordAccount() throws Exception {
+		Session existing = oldPasswordAccount();
 		String subject = "google-" + UUID.randomUUID();
 
 		Cookie first = googleLogin(subject, existing.email(), true).getCookie("refresh_token");
@@ -84,22 +88,16 @@ class GoogleLoginTests {
 	}
 
 	/**
-	 * Someone registers the victim's email with a password (never verified); the victim
-	 * later signs in with Google. The squatter must lose the account completely: password,
+	 * Back when passwords existed, someone registered the victim's email (never verified);
+	 * the victim now signs in with Google. The squatter must lose the account completely:
 	 * refresh sessions and access tokens already handed out.
 	 */
 	@Test
 	void linkingGoogleLocksOutWhoeverRegisteredTheEmailWithAPassword() throws Exception {
-		Session squatter = TestUsers.register(this.mvc);
+		Session squatter = oldPasswordAccount();
 
 		Cookie owners = googleLogin("google-" + UUID.randomUUID(), squatter.email(), true).getCookie("refresh_token");
 
-		assertThat(this.mvc.post()
-			.uri("/api/v1/auth/login")
-			.contentType(MediaType.APPLICATION_JSON)
-			.content("""
-					{"email": "%s", "password": "%s"}
-					""".formatted(squatter.email(), TestUsers.PASSWORD))).hasStatus(HttpStatus.UNAUTHORIZED);
 		assertThat(this.mvc.get().uri("/api/v1/users/me").header(HttpHeaders.AUTHORIZATION, squatter.bearer()))
 			.hasStatus(HttpStatus.UNAUTHORIZED);
 		assertThat(this.mvc.post().uri("/api/v1/auth/refresh").cookie(squatter.refreshCookie()))
@@ -152,6 +150,10 @@ class GoogleLoginTests {
 		assertThat(response.getRedirectedUrl())
 			.isEqualTo("http://localhost:4200/login?error=oauth&reason=email-not-verified");
 		assertThat(response.getCookie("refresh_token")).isNull();
+	}
+
+	private Session oldPasswordAccount() {
+		return new TestApi(this.mvc, this.jdbc).unlinkGoogle(TestUsers.register(this.mvc));
 	}
 
 	private MockHttpServletResponse googleLogin(String subject, String email, boolean emailVerified) throws Exception {

@@ -50,10 +50,10 @@ All optional for local use; the defaults work out of the box.
 | `FRONTEND_URL` | `http://localhost:4200` | Where the Google login redirects back to. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Comma-separated origins allowed to call the API directly (not needed behind the frontend's dev proxy). |
 | `REFRESH_COOKIE_SECURE` | `true` | `Secure` flag on the refresh cookie. Chrome accepts it on `http://localhost`; set `false` if your browser drops it. |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | placeholder | Enables "Login with Google". Without them everything else works. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | placeholder | Needed to sign in at all: Google is the only login. The tests don't need them. |
 | `SERVER_FORWARD_HEADERS_STRATEGY` | none | Set to `native` behind a reverse proxy, so Google's redirect URI uses the proxy's `https` scheme. |
 
-### Google login (optional)
+### Google login (required)
 
 1. In Google Cloud Console create an OAuth client ID of type *Web application*.
 2. Add the redirect URI `http://localhost:4200/login/oauth2/code/google` (the frontend's
@@ -129,7 +129,7 @@ ARCHITECTURE.md §5.4). Everything except `/auth/*` and `/actuator/health` needs
 
 | Area | Endpoints |
 |---|---|
-| Auth | `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`; Google via `/oauth2/authorization/google` |
+| Auth | Google only: `/oauth2/authorization/google` (web), `POST /auth/google/mobile` (app); `POST /auth/refresh`, `/auth/logout`, `/auth/mobile/refresh`, `/auth/mobile/logout` |
 | User | `GET /users/me`, `GET`/`PUT /users/me/settings` |
 | Family transfers | `GET`/`POST /family-transfers`, `POST /family-transfers/{id}/collect`, `POST /family-transfers/{id}/take-back` |
 | Family | `POST /families`, `GET /families/current`, `POST`/`GET /families/current/invitations`, `DELETE /families/current/invitations/{id}`, `GET /invitations`, `POST /invitations/{id}/accept`, `POST /invitations/{id}/decline`, `POST /families/current/leave`, `PATCH`/`DELETE /families/current/members/{userId}` |

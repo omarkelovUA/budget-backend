@@ -4,7 +4,7 @@ import org.springframework.http.HttpStatus;
 
 /**
  * A domain error that maps to an HTTP status plus a stable problem {@code type} slug the
- * frontend can switch on (ARCHITECTURE.md §5.4), e.g. {@code email-taken}.
+ * frontend can switch on (ARCHITECTURE.md §5.4), e.g. {@code invalid-refresh-token}.
  */
 public class ApiException extends RuntimeException {
 
